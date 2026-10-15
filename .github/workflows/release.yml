@@ -9,25 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: build and publish
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write  # trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - run: uv build
-
-      - name: Verify the artifacts
-        run: |
-          uvx twine check dist/*
-          ls -lh dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
   github-release:
     name: github release
     runs-on: ubuntu-latest
@@ -37,8 +18,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv build
+      - name: Verify the artifacts
+        run: uvx twine check dist/*
       - name: Attach artifacts
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          fail_on_unmatched_files: true
           generate_release_notes: true
+
+  # PyPI is not set up for this project, and the one-line installer falls back
+  # to the GitHub archive, so publishing is off by default rather than red on
+  # every tag. To enable it: create the `pypi` environment, add a trusted
+  # publisher for this repo, then set `enabled: true` below.
+  pypi:
+    name: publish to pypi
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
