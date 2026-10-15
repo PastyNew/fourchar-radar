@@ -15,8 +15,8 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv sync --all-extras
@@ -27,8 +27,8 @@ jobs:
     name: types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv sync --all-extras
@@ -42,8 +42,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv sync --all-extras
@@ -57,7 +57,7 @@ jobs:
     name: installers parse
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: POSIX shell syntax
         run: sh -n install.sh
       - name: Windows install script parses
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fail if placeholder links remain
         run: |
           # Built from parts so this file does not match its own pattern.
@@ -91,7 +91,7 @@ jobs:
     name: docker image builds
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t fourchar-radar:ci .
       - run: docker run --rm fourchar-radar:ci --version
       - run: docker run --rm fourchar-radar:ci sources
