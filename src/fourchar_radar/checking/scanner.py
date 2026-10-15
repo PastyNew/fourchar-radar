@@ -68,6 +68,11 @@ class Scanner:
         self._last_progress = 0.0
         self._last_report_at = 0.0
         self._free_names: list[str] = []
+        #: How many candidates are left, for the ETA. ``None`` when the source
+        #: size is unknown, in which case no estimate is shown rather than a
+        #: made-up one.
+        self._remaining: int | None = None
+        self._source_total: int | None = None
         # Long throttle penalties must not delay shutdown.
         if limiter.stop_event is None:
             limiter.stop_event = self._stop
@@ -131,6 +136,8 @@ class Scanner:
         """Push fresh candidates onto the queue, honouring the resume set."""
         processed = 0
         limit = self.settings.limit
+        self._source_total = source.total
+        self._count_remaining()
 
         for name in source:
             if self.stopping:
@@ -145,6 +152,7 @@ class Scanner:
                 # name found in an earlier run is a find the user never heard
                 # about — so replay whatever was never reported.
                 await self._replay_known(name)
+                self._count_remaining()
                 continue
 
             # `put` in slices so a stop request is noticed even when the queue
@@ -154,6 +162,7 @@ class Scanner:
             except TimeoutError:
                 continue
             processed += 1
+            self._count_remaining(advance=processed)
 
             if processed % 25 == 0:
                 self._log_progress()
@@ -227,6 +236,18 @@ class Scanner:
         self._log_progress()
         await self._maybe_report()
 
+    def _count_remaining(self, advance: int = 0) -> None:
+        """Track how many candidates are still to be checked, for the ETA.
+
+        A resumed scan walks past thousands of known names before reaching new
+        ground, and without a number the user cannot tell that apart from a
+        hang. Unknown total (stdin) means no estimate, never a guessed one.
+        """
+        if self._source_total is None:
+            self._remaining = None
+            return
+        self._remaining = max(0, self._source_total - self.stats.skipped - advance)
+
     async def _replay_known(self, name: str) -> None:
         """Report a name this scan skipped, if it was never reported before.
 
@@ -299,6 +320,7 @@ class Scanner:
                 free_names=self._free_names[-20:],
                 rate_rps=snapshot.rate_rps,
                 throttles=snapshot.throttles,
+                remaining=self._remaining,
             )
         except Exception:  # noqa: BLE001
             log.warning("could not post the progress report", exc_info=True)

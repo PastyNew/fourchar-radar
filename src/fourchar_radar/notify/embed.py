@@ -16,6 +16,16 @@ from ..models import TIER_COLORS, Finding, ScanStats, Tier
 #: and pinning the exact shape would break on every new one.
 EmbedDict = dict[str, Any]
 
+
+def _duration(seconds: float) -> str:
+    """Human duration, escalating to days for multi-day scans."""
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
+        if seconds >= size:
+            value = seconds / size
+            return f"{value:.0f}{unit}" if value >= 10 or unit == "s" else f"{value:.1f}{unit}"
+    return f"{seconds:.0f}s"
+
+
 BRAND = "fourchar-radar"
 EMBED_FOOTER = "Heuristic estimate — not a market valuation."
 TIER_EMOJI: dict[Tier, str] = {
@@ -77,6 +87,7 @@ def build_progress_embed(
     free_names: Sequence[str] = (),
     rate_rps: float | None = None,
     throttles: int = 0,
+    remaining: int | None = None,
 ) -> EmbedDict:
     """Periodic heartbeat.
 
@@ -98,6 +109,18 @@ def build_progress_embed(
         fields.append({"name": "Rate", "value": f"{rate_rps:.4f} req/s", "inline": True})
     if throttles:
         fields.append({"name": "Throttles", "value": f"{throttles:,}", "inline": True})
+    if rate_rps and rate_rps > 0:
+        # The single most useful field on this card. One check every two
+        # minutes looks exactly like a hang without it.
+        fields.append({"name": "Next check in", "value": _duration(1 / rate_rps), "inline": True})
+    if remaining and rate_rps and rate_rps > 0:
+        fields.append(
+            {
+                "name": "Estimated left",
+                "value": f"~{_duration(remaining / rate_rps)} ({remaining:,} names)",
+                "inline": True,
+            }
+        )
 
     description = None
     if free_names:

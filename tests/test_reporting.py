@@ -139,3 +139,74 @@ async def test_every_result_is_delivered() -> None:
     titles = [p["embeds"][0]["title"] for p in rec.payloads]
     assert "free" in titles[0].lower()
     assert "taken" in titles[1].lower()
+
+
+# ----------------------------------------------------------------- pacing
+def test_progress_states_when_the_next_check_is_due() -> None:
+    """One check every two minutes must not look like a hang."""
+    stats = ScanStats(started_at=utcnow(), checked=1, taken=1)
+    embed = build_progress_embed(stats, rate_rps=0.0076)
+    fields = {f["name"]: f["value"] for f in embed["fields"]}
+    assert fields["Next check in"] == "2.2m"
+
+
+def test_progress_estimates_the_remainder() -> None:
+    stats = ScanStats(checked=100, found=2, taken=98)
+    embed = build_progress_embed(stats, rate_rps=0.0076, remaining=2000)
+    fields = {f["name"]: f["value"] for f in embed["fields"]}
+    assert "Estimated left" in fields
+    assert "2,000 names" in fields["Estimated left"]
+
+
+def test_no_estimate_without_a_rate() -> None:
+    """Never show a number derived from a rate of zero."""
+    embed = build_progress_embed(ScanStats(checked=5), rate_rps=0.0, remaining=100)
+    names = {f["name"] for f in embed["fields"]}
+    assert "Next check in" not in names
+    assert "Estimated left" not in names
+
+
+def test_no_estimate_without_a_remainder() -> None:
+    """An unknown total means no ETA, not a made-up one."""
+    embed = build_progress_embed(ScanStats(checked=5), rate_rps=0.0076, remaining=None)
+    assert "Estimated left" not in {f["name"] for f in embed["fields"]}
+
+
+def test_remaining_is_counted_down_by_the_scanner() -> None:
+    from fourchar_radar.checking.ratelimit import AdaptiveRateLimiter
+    from fourchar_radar.checking.scanner import Scanner
+    from fourchar_radar.storage import Store
+
+    class Source:
+        def __init__(self, names: list[str]) -> None:
+            self._names = names
+            self.total = len(names)
+            self.label = "test"
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            return iter(self._names)
+
+    class Never:
+        async def check(self, name: str):  # type: ignore[no-untyped-def]
+            raise AssertionError("nothing new to check here")
+
+    import asyncio
+    import tempfile
+    from pathlib import Path
+
+    from fourchar_radar.models import Verdict, utcnow
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "r.db")
+        settings = Settings(discord_webhook_url=WEBHOOK, db_path=str(Path(tmp) / "r.db"))
+        # Two of the four were checked on an earlier run.
+        for name in ("zzzz", "yyyy"):
+            store.record(Verdict(name=name, available=False, checked_at=utcnow()), None)
+
+        scanner = Scanner(settings, store, Never(), AdaptiveRateLimiter(20.0, start_rps=20.0), None)
+        asyncio.run(scanner.run(Source(["aaaa", "bbbb", "zzzz", "yyyy"])))
+
+        assert scanner.stats.skipped == 2
+        # The two new names are outstanding work.
+        assert scanner._remaining == 2
+        store.close()

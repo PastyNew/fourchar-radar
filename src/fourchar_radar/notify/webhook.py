@@ -181,6 +181,7 @@ class WebhookNotifier:
         free_names: Sequence[str] = (),
         rate_rps: float | None = None,
         throttles: int = 0,
+        remaining: int | None = None,
     ) -> None:
         """Say what the scan is doing, even when it has found nothing.
 
@@ -190,7 +191,11 @@ class WebhookNotifier:
         await self._post(
             self._envelope(
                 build_progress_embed(
-                    stats, free_names=free_names, rate_rps=rate_rps, throttles=throttles
+                    stats,
+                    free_names=free_names,
+                    rate_rps=rate_rps,
+                    throttles=throttles,
+                    remaining=remaining,
                 )
             )
         )

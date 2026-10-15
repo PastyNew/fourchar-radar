@@ -538,8 +538,14 @@ class RadarTui:
     ) -> None:
         """Announce the same heartbeat Discord just received."""
         parts = [f"checked {stats.checked:,}", f"taken {stats.taken:,}", f"free {stats.found:,}"]
+        if stats.skipped:
+            parts.append(f"skipped {stats.skipped:,}")
         if rate_rps is not None:
             parts.append(f"{rate_rps:.4f} req/s")
+            if rate_rps > 0:
+                # Say how long the next gap is. At one check every two minutes
+                # a quiet screen reads as a hang, and it is not one.
+                parts.append(f"next in {_duration(1 / rate_rps)}")
         if throttles:
             parts.append(f"throttled {throttles}×")
         self._queue.put("__PING__" + " · ".join(parts))
@@ -576,6 +582,15 @@ class _DualNotifier:
 
     async def close(self) -> None:
         await self._webhook.close()
+
+
+def _duration(seconds: float) -> str:
+    """Human duration, escalating to days for multi-day scans."""
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
+        if seconds >= size:
+            value = seconds / size
+            return f"{value:.0f}{unit}" if value >= 10 or unit == "s" else f"{value:.1f}{unit}"
+    return f"{seconds:.0f}s"
 
 
 def _stats_line(stats: ScanStats) -> str:

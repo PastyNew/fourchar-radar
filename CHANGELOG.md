@@ -66,6 +66,16 @@ First public release.
 
 ### Fixed
 
+- A scan doing one check every ~2 minutes looked broken: the screen sat still
+  with no indication anything was happening. The progress card and the
+  terminal heartbeat now state "Next check in 2.2m" and "Estimated left ~3.6d
+  (2,396 names)", and the scanner tracks how many candidates are still
+  outstanding so the estimate is real rather than decorative. No estimate is
+  shown when the total is unknown (stdin) or the rate is zero, rather than a
+  made-up one.
+
+### Added
+
 - A resumed scan silently skipped every name it already knew, so the user
   watched a "skipped" counter climb with no output — indistinguishable from a
   hang. Skipped names are now replayed from the database, once each: free ones
