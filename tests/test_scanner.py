@@ -73,7 +73,7 @@ async def _scan(
     notifier: object | None = None,
 ):  # type: ignore[no-untyped-def]
     # Deliberately not settings.rate_limit_rps: tests must not sleep on pacing.
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0, start_rps=1000.0)
     scanner = Scanner(settings, store, checker, limiter, notifier or NullNotifier())  # type: ignore[arg-type]
     return scanner, await scanner.run(source)  # type: ignore[arg-type]
 
@@ -155,7 +155,7 @@ async def test_limit_caps_the_number_of_new_checks(store: Store) -> None:
 
 async def test_stop_ends_the_scan_early(store: Store) -> None:
     checker = FakeChecker()
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0, start_rps=1000.0)
     scanner = Scanner(_settings(), store, checker, limiter, NullNotifier())  # type: ignore[arg-type]
 
     class StopAfterTwo(FixedSource):
@@ -205,13 +205,13 @@ async def test_concurrency_greater_than_one(store: Store) -> None:
 
 async def test_scanner_wires_the_stop_event_into_the_limiter(store: Store) -> None:
     """Without this, a throttle penalty makes the process un-stoppable."""
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0, start_rps=1000.0)
     Scanner(_settings(), store, FakeChecker(), limiter, NullNotifier())  # type: ignore[arg-type]
     assert limiter.stop_event is not None
 
 
 async def test_no_notifier_is_fine(store: Store) -> None:
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000.0, start_rps=1000.0)
     scanner = Scanner(_settings(), store, FakeChecker(free={"cool"}), limiter, None)  # type: ignore[arg-type]
     report = await scanner.run(FixedSource(["cool"]))
     assert report.stats.found == 1

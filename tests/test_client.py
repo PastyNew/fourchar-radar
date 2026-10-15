@@ -21,7 +21,7 @@ def _client(
     settings: Settings, handler: httpx.MockTransport
 ) -> tuple[DiscordAvailabilityClient, httpx.AsyncClient]:
     http = httpx.AsyncClient(transport=handler)
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000, start_rps=1000)
     return DiscordAvailabilityClient(settings, limiter, client=http), http
 
 
@@ -190,7 +190,7 @@ async def test_stop_during_a_penalty_aborts_promptly(settings: Settings) -> None
     """Guards the hang this project actually shipped during development."""
     import asyncio
 
-    limiter = AdaptiveRateLimiter(ceiling_rps=1000)
+    limiter = AdaptiveRateLimiter(ceiling_rps=1000, start_rps=1000)
     http = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(429, json={"retry_after": 3600}))
     )
@@ -210,7 +210,8 @@ async def test_stop_during_a_penalty_aborts_promptly(settings: Settings) -> None
 
 async def test_default_client_sends_web_client_headers(settings: Settings) -> None:
     """The real (non-injected) client must look like the registration flow."""
-    client = DiscordAvailabilityClient(settings, AdaptiveRateLimiter(ceiling_rps=1.0))
+    fast = AdaptiveRateLimiter(ceiling_rps=1.0, start_rps=1000.0)
+    client = DiscordAvailabilityClient(settings, fast)
     try:
         headers = client._client.headers
         assert headers["user-agent"].startswith("fourchar-radar")
@@ -223,5 +224,5 @@ async def test_default_client_sends_web_client_headers(settings: Settings) -> No
 
 async def test_proxy_is_configured_when_set(settings: Settings) -> None:
     configured = settings.model_copy(update={"proxy": "http://127.0.0.1:9"})
-    client = DiscordAvailabilityClient(configured, AdaptiveRateLimiter(1.0))
+    client = DiscordAvailabilityClient(configured, AdaptiveRateLimiter(1.0, start_rps=1000.0))
     await client.aclose()

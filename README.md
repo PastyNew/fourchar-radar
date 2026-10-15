@@ -44,6 +44,13 @@ Against a search space of 37⁴ = 1,874,161 possible 4-character names:
 | bundled wordlist (2,418 names) | **~4 days** |
 | full `bruteforce` sweep | **years** — it works, but expect never to finish it |
 
+One more measurement worth knowing: a request sent *during* a penalty makes it
+worse. A single probe mid-penalty extended it by ~15 minutes. So the radar
+sleeps out the full `retry_after` and never probes early — and the limiter now
+**starts** at the measured rate (~0.0076 req/s) rather than at the configured
+ceiling, because climbing down from too fast costs one 35-minute penalty per
+halving, several hours of doing nothing.
+
 This is not a limitation the project pretends away. It is the reason the
 architecture looks the way it does:
 
@@ -262,6 +269,29 @@ configuration:
 ```bash
 fourchar-radar run --source file --names-file my-list.txt
 ```
+
+---
+
+## What gets posted to Discord
+
+| Message | When |
+|---|---|
+| `fourchar-radar` connected | once, at startup |
+| `🟢 cool is free — $1,250 (rare)` | per-name mode, name still free |
+| `⚪ zzzz is taken` | per-name mode, name taken |
+| `🎯 cool is free` + reasons | default mode, good find only |
+| `📡 Still searching` | heartbeat: checked / taken / free / rate / throttles |
+
+The heartbeat matters more than it looks. A scan runs for days and the channel
+is otherwise silent for hours, which is indistinguishable from a crash.
+
+```bash
+fourchar-radar run <URL> --report-every     # every name, free and taken
+fourchar-radar run <URL> --report-every-checks 50
+fourchar-radar run <URL> --no-progress      # only the good finds
+```
+
+In the menu, option **2** asks which of the two you want.
 
 ---
 

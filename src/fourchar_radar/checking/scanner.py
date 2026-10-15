@@ -66,6 +66,8 @@ class Scanner:
         self._stop = asyncio.Event()
         self._last_alert_at = 0.0
         self._last_progress = 0.0
+        self._last_report_at = 0.0
+        self._free_names: list[str] = []
         # Long throttle penalties must not delay shutdown.
         if limiter.stop_event is None:
             limiter.stop_event = self._stop
@@ -166,7 +168,7 @@ class Scanner:
                 queue.task_done()
 
     # ---------------------------------------------------------- pipeline
-    async def _process(self, name: str) -> None:
+    async def _process(self, name: str) -> None:  # noqa: C901 - one linear pipeline
         try:
             verdict = await self.client.check(name)
         except InvalidUsername as exc:
@@ -194,13 +196,17 @@ class Scanner:
         if not verdict.available:
             self.stats.taken += 1
             self.store.record(verdict, None)
+            if self.settings.report_every:
+                await self._report_result(verdict.name, False)
             self._log_progress()
+            await self._maybe_report()
             return
 
         quote = estimate(verdict.name)
         finding = Finding(verdict=verdict, quote=quote)
         self.store.record(verdict, quote)
         self.stats.found += 1
+        self._free_names.append(verdict.name)
 
         log.info(
             "free username found",
@@ -210,12 +216,66 @@ class Scanner:
                 "tier": str(quote.tier),
             },
         )
+        if self.settings.report_every:
+            await self._report_result(verdict.name, True, quote.price_label, str(quote.tier))
         await self._maybe_alert(finding)
         self._log_progress()
+        await self._maybe_report()
+
+    async def _report_result(
+        self, name: str, available: bool, price_label: str = "", tier: str = ""
+    ) -> None:
+        """Send the verdict on a single name, free or taken."""
+        notify_result = getattr(self.notifier, "notify_result", None)
+        if notify_result is None:
+            return
+        try:
+            await notify_result(name, available, price_label, tier)
+        except Exception:  # noqa: BLE001 - reporting must never kill a scan
+            log.warning("could not report the result for %s", name, exc_info=True)
+
+    async def _maybe_report(self) -> None:
+        """Post a heartbeat once enough checks (or time) have passed.
+
+        Both gates matter: a count gate keeps the message rate sane, and the
+        time gate means a slow scan still says something on a predictable
+        schedule rather than whenever the counter happens to land.
+        """
+        if self.notifier is None or not self.settings.report_progress:
+            return
+
+        now = time.monotonic()
+        due_by_count = (
+            self.settings.report_every_checks
+            and self.stats.checked % self.settings.report_every_checks == 0
+        )
+        due_by_time = now - self._last_report_at >= self.settings.report_interval_s
+        if not (due_by_count or due_by_time):
+            return
+
+        notify_progress = getattr(self.notifier, "notify_progress", None)
+        if notify_progress is None:
+            return
+
+        self._last_report_at = now
+        snapshot = self.limiter.snapshot()
+        try:
+            await notify_progress(
+                self.stats,
+                free_names=self._free_names[-20:],
+                rate_rps=snapshot.rate_rps,
+                throttles=snapshot.throttles,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("could not post the progress report", exc_info=True)
 
     async def _maybe_alert(self, finding: Finding) -> None:
         """Send an alert if the find clears the tier filter and cooldown."""
         if self.notifier is None:
+            return
+        # In per-name reporting mode the result embed already said "free", with
+        # the price and tier. A second message for the same name is noise.
+        if self.settings.report_every:
             return
         if finding.tier.rank < self.settings.min_tier_rank:
             return

@@ -6,6 +6,7 @@ the discord.py dependency.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC
 from typing import Any
 
@@ -67,6 +68,73 @@ def build_throttle_embed(retry_after: float, rate_rps: float) -> EmbedDict:
             {"name": "New rate", "value": f"{rate_rps:.3f} req/s", "inline": True},
         ],
         "footer": {"text": f"{BRAND} · this is normal, not an error"},
+    }
+
+
+def build_progress_embed(
+    stats: ScanStats,
+    *,
+    free_names: Sequence[str] = (),
+    rate_rps: float | None = None,
+    throttles: int = 0,
+) -> EmbedDict:
+    """Periodic heartbeat.
+
+    A scan runs for days against a throttle that lets through a handful of
+    requests at a time. With no heartbeat the channel is silent for hours,
+    which is indistinguishable from a broken install — so the radar says what
+    it is doing even when it has found nothing at all.
+    """
+    fields: list[dict[str, Any]] = [
+        {"name": "Checked", "value": f"{stats.checked:,}", "inline": True},
+        {"name": "Taken", "value": f"{stats.taken:,}", "inline": True},
+        {"name": "Free", "value": f"{stats.found:,}", "inline": True},
+        {"name": "Skipped", "value": f"{stats.skipped:,}", "inline": True},
+        {"name": "Errors", "value": f"{stats.errors:,}", "inline": True},
+        {"name": "Alerts", "value": f"{stats.alerts_sent:,}", "inline": True},
+        {"name": "Elapsed", "value": f"{stats.elapsed_s / 3600:.1f} h", "inline": True},
+    ]
+    if rate_rps is not None:
+        fields.append({"name": "Rate", "value": f"{rate_rps:.4f} req/s", "inline": True})
+    if throttles:
+        fields.append({"name": "Throttles", "value": f"{throttles:,}", "inline": True})
+
+    description = None
+    if free_names:
+        shown = list(free_names)[:10]
+        listed = "\n".join(f"• `{n}`" for n in shown)
+        extra = "" if len(free_names) <= 10 else f"\n…and {len(free_names) - 10} more"
+        description = f"**Free so far**\n{listed}{extra}"
+    elif stats.found == 0 and stats.checked:
+        description = "Nothing free yet. Expected — most short names are taken."
+
+    embed: EmbedDict = {
+        "title": "📡 Still searching",
+        "description": description or "Checking names one at a time.",
+        "color": 0x95A5A6,
+        "fields": fields,
+        "footer": {"text": f"{BRAND} · slow by necessity, not by choice"},
+    }
+    return embed
+
+
+def build_result_embed(
+    name: str, available: bool, price_label: str = "", tier: str = ""
+) -> EmbedDict:
+    """One message per check, for the ``--report-every`` mode."""
+    if available:
+        suffix = f" — {price_label} ({tier})" if price_label else ""
+        return {
+            "title": f"🟢 `{name}` is free{suffix}",
+            "description": "Available to claim right now.",
+            "color": 0x3BA55C,
+            "footer": {"text": BRAND},
+        }
+    return {
+        "title": f"⚪ `{name}` is taken",
+        "description": "Already claimed, moving on.",
+        "color": 0x9BA5B4,
+        "footer": {"text": BRAND},
     }
 
 

@@ -30,6 +30,19 @@ log = logging.getLogger(__name__)
 #: Never throttle below this, or the radar silently stops making progress.
 FLOOR_RPS = 0.002  # one request per ~8 minutes
 
+#: Measured sustained rate, requests/second.
+#:
+#: The endpoint allows a burst of roughly 16 requests, then hands back a
+#: ~35 minute ``retry_after``. Requests sent *during* the penalty make it
+#: worse — one mid-penalty probe was observed adding ~15 minutes — so a client
+#: that waits out the full penalty and then drips slowly gets about 16 per 35
+#: minutes, which is 16 / 2100 ≈ 0.0076 req/s.
+#:
+#: The limiter therefore *starts here* rather than at the configured ceiling.
+#: Starting at the ceiling means several 429s (each costing half an hour) just
+#: to climb down to the rate that would have worked from the first request.
+OBSERVED_SAFE_RPS = 0.0076
+
 
 @dataclass(slots=True)
 class LimiterSnapshot:
@@ -59,9 +72,14 @@ class AdaptiveRateLimiter:
         decrease: float = 0.5,
         jitter: float = 0.2,
         on_throttle: Callable[[float], None] | None = None,
+        start_rps: float | None = None,
     ) -> None:
         self.ceiling_rps = max(ceiling_rps, floor_rps)
-        self._rate = self.ceiling_rps
+        # Start where the endpoint is known to tolerate, not at the ceiling.
+        # The AIMD loop then climbs if there is headroom, and each mistake
+        # costs half an hour, so starting high is expensive.
+        initial = OBSERVED_SAFE_RPS if start_rps is None else start_rps
+        self._rate = min(self.ceiling_rps, max(initial, floor_rps))
         self._floor_rps = floor_rps
         self._success_step = success_step
         self._increase = increase

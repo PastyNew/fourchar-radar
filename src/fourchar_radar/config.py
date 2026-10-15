@@ -68,12 +68,23 @@ class Settings(BaseSettings):
 
     # -------------------------------------------------------- networking
     rate_limit_rps: float = Field(
-        default=0.5,
+        default=0.02,
         gt=0,
         le=20,
         description=(
-            "Upper bound on request rate. The adaptive limiter sits below this "
-            "because Discord throttles the public endpoint aggressively."
+            "Ceiling on request rate, not a target. The limiter starts at the "
+            "measured safe rate (~0.0076 req/s) and climbs toward this only if "
+            "Discord tolerates it. Raising it past what the endpoint allows "
+            "costs a 35-minute penalty per mistake."
+        ),
+    )
+    rate_limit_start_rps: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Starting request rate. 0 means 'use the measured safe rate'. Only "
+            "raise it if this process has its own egress IP, or for tests — "
+            "one IP cannot go faster regardless of what is set here."
         ),
     )
     concurrency: int = Field(default=1, ge=1, le=16)
@@ -87,6 +98,29 @@ class Settings(BaseSettings):
     alert_min_tier: Tier = Tier.RARE
     alert_cooldown_s: float = Field(default=0.0, ge=0)
     alert_embeds: bool = True
+
+    # ----------------------------------------------------------- reporting
+    # A scan can go hours without finding anything, and a silent channel is
+    # indistinguishable from a crash. These control how often the radar says
+    # what it is doing.
+    report_progress: bool = True
+    report_every_checks: int = Field(
+        default=25,
+        ge=0,
+        description="post a heartbeat every N checks (0 = only on the time gate)",
+    )
+    report_interval_s: float = Field(
+        default=1800.0,
+        gt=0,
+        description="at least this often, so a slow scan still reports",
+    )
+    report_every: bool = Field(
+        default=False,
+        description=(
+            "also post the verdict on every single name, free or taken. "
+            "Useful with a small wordlist, very noisy with bruteforce."
+        ),
+    )
 
     # ---------------------------------------------------------- storage
     # Absolute by default: a relative path breaks the moment the radar is

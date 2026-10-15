@@ -22,6 +22,7 @@ import queue
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -242,13 +243,34 @@ class RadarTui:
             INK.dim("  It is remembered for next time. Option 2 will verify it with Discord.")
         )
 
+    def _ask_report_mode(self) -> bool:
+        """Ask how chatty the channel should be.
+
+        Reporting every verdict is what most people want from a radar — silence
+        on a scan that runs for days reads as "broken". But it is one message
+        per check, so it is opt-in rather than the default.
+        """
+        CONSOLE.line()
+        CONSOLE.line("  How much should the channel say?")
+        CONSOLE.line(f"    a) {INK.bold('every name')} — free AND taken, one message each")
+        CONSOLE.line(INK.dim("    b) just the good ones + a progress ping every 30 min"))
+        CONSOLE.line()
+        answer = self._prompt("Choose a or b:").lower()
+        return answer.startswith("a")
+
     def search(self) -> None:
         if not self.webhook:
             CONSOLE.line(INK.yellow("  No webhook yet. Choose option 1 first."))
             return
 
+        report_every = self._ask_report_mode()
+
         try:
-            settings = Settings(discord_webhook_url=self.webhook, db_path=self.db_path)
+            settings = Settings(
+                discord_webhook_url=self.webhook,
+                db_path=self.db_path,
+                report_every=report_every,
+            )
         except ConfigError as exc:
             CONSOLE.line(INK.red(f"  {exc}"))
             return
@@ -379,7 +401,16 @@ class RadarTui:
             elif item.startswith("__FOUND__"):
                 self._found_count += 1
                 self._recent.append(item[len("__FOUND__") :])
-                CONSOLE.line(f"  {INK.green('FOUND')}  {item[len('__FOUND__') :]}")
+                CONSOLE.line(f"  {INK.green('FREE')}   {item[len('__FOUND__') :]}")
+            elif item.startswith("__TAKEN__"):
+                body = item[len("__TAKEN__") :]
+                if "FREE" in body:
+                    CONSOLE.line(f"  {INK.green('FREE')}   {body}")
+                else:
+                    CONSOLE.line(INK.dim(f"  taken  {body}"))
+            elif item.startswith("__PING__"):
+                self._clear_status()
+                CONSOLE.line(INK.dim(f"  ── {item[len('__PING__') :]}"))
             elif item.startswith("__STATS__"):
                 # Progress ticker: rewrite the line in place so it does not
                 # scroll the log away.
@@ -406,6 +437,17 @@ class RadarTui:
             return
         CONSOLE.write("\r\033[2K")
 
+    def _notifier(self, settings: Settings) -> WebhookNotifier:
+        """Post to Discord *and* mirror into the terminal.
+
+        The scanner takes a single notifier, and the terminal app needs to see
+        every message too. Handing the scanner the app alone would silence the
+        channel — the whole point is that it reports there — so the app wraps
+        the webhook rather than replacing it.
+        """
+        webhook = WebhookNotifier(settings)
+        return _DualNotifier(webhook, self)  # type: ignore[return-value]
+
     def _worker(self, settings: Settings) -> None:
         """Thread body: its own event loop, no terminal writes from here."""
         try:
@@ -421,7 +463,7 @@ class RadarTui:
     async def _scan(self, settings: Settings) -> None:
         self._loop = asyncio.get_running_loop()
 
-        notifier = WebhookNotifier(settings)
+        notifier = self._notifier(settings)
         try:
             await notifier.verify()
         except InvalidWebhook:
@@ -429,11 +471,14 @@ class RadarTui:
             raise
         self._queue.put("webhook verified by Discord")
 
-        limiter = AdaptiveRateLimiter(settings.rate_limit_rps)
+        limiter = AdaptiveRateLimiter(
+            settings.rate_limit_rps,
+            start_rps=settings.rate_limit_start_rps or None,
+        )
         store = Store(settings.db_path)
         try:
             async with DiscordAvailabilityClient(settings, limiter) as client:
-                scanner = Scanner(settings, store, client, limiter, self)
+                scanner = Scanner(settings, store, client, limiter, notifier)
                 self._scanner = scanner
                 beat = asyncio.create_task(self._heartbeat(scanner))
                 try:
@@ -469,6 +514,68 @@ class RadarTui:
         """The scanner calls this for every alert-worthy find."""
         quote = finding.quote
         self._queue.put(f"__FOUND__{quote.name:<8} {quote.price_label:>9}  {quote.tier.value}")
+
+    async def notify_result(
+        self, name: str, available: bool, price_label: str = "", tier: str = ""
+    ) -> None:
+        """Mirror the per-name Discord message into the terminal too.
+
+        Discord now says "free" or "taken" for every check, and the terminal
+        should not be the poorer half of that.
+        """
+        if available:
+            tail = f"  {price_label} ({tier})" if price_label else ""
+            self._queue.put(f"__TAKEN__{name}  FREE{tail}")
+        else:
+            self._queue.put(f"__TAKEN__{name}  taken")
+
+    async def notify_progress(
+        self,
+        stats: ScanStats,
+        free_names: Sequence[str] = (),
+        rate_rps: float | None = None,
+        throttles: int = 0,
+    ) -> None:
+        """Announce the same heartbeat Discord just received."""
+        parts = [f"checked {stats.checked:,}", f"taken {stats.taken:,}", f"free {stats.found:,}"]
+        if rate_rps is not None:
+            parts.append(f"{rate_rps:.4f} req/s")
+        if throttles:
+            parts.append(f"throttled {throttles}×")
+        self._queue.put("__PING__" + " · ".join(parts))
+
+
+class _DualNotifier:
+    """Forwards to the webhook, then mirrors into the terminal.
+
+    Discord is where the user asked to be told; the terminal is where they
+    are sitting. Both should show the same thing, so neither is dropped when
+    the other is added.
+    """
+
+    def __init__(self, webhook: WebhookNotifier, tui: RadarTui) -> None:
+        self._webhook = webhook
+        self._tui = tui
+
+    async def verify(self) -> None:
+        await self._webhook.verify()
+
+    async def notify(self, finding: Any) -> None:
+        await self._webhook.notify(finding)
+        await self._tui.notify(finding)
+
+    async def notify_result(
+        self, name: str, available: bool, price_label: str = "", tier: str = ""
+    ) -> None:
+        await self._webhook.notify_result(name, available, price_label, tier)
+        await self._tui.notify_result(name, available, price_label, tier)
+
+    async def notify_progress(self, *args: Any, **kwargs: Any) -> None:
+        await self._webhook.notify_progress(*args, **kwargs)
+        await self._tui.notify_progress(*args, **kwargs)
+
+    async def close(self) -> None:
+        await self._webhook.close()
 
 
 def _stats_line(stats: ScanStats) -> str:

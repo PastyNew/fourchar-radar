@@ -111,6 +111,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--cooldown", type=float, help="minimum seconds between alerts")
     run.add_argument("--dry-run", action="store_true", help="scan but never post")
     run.add_argument(
+        "--report-every",
+        action="store_true",
+        help="post the verdict on every name, free or taken (noisy)",
+    )
+    run.add_argument(
+        "--report-every-checks",
+        type=int,
+        help="post a progress heartbeat every N checks (default 25)",
+    )
+    run.add_argument(
+        "--report-interval",
+        type=float,
+        help="seconds between progress heartbeats (default 1800)",
+    )
+    run.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="never post progress, only individual finds",
+    )
+    run.add_argument(
         "--watch",
         action="store_true",
         help="keep re-streaming the source after it is exhausted",
@@ -221,6 +241,14 @@ def _apply_overrides(args: argparse.Namespace, settings: Settings) -> Settings:
         overrides["alert_min_tier"] = _tier_for_price(int(args.min_price))
     if getattr(args, "log_json", False):
         overrides["log_json"] = True
+    if getattr(args, "report_every", False):
+        overrides["report_every"] = True
+    if getattr(args, "report_every_checks", None) is not None:
+        overrides["report_every_checks"] = args.report_every_checks
+    if getattr(args, "report_interval", None) is not None:
+        overrides["report_interval_s"] = args.report_interval
+    if getattr(args, "no_progress", False):
+        overrides["report_progress"] = False
     if getattr(args, "dry_run", False):
         overrides["alert_webhook"] = False
         overrides["discord_webhook_url"] = ""
@@ -273,7 +301,10 @@ async def _run_async(args: argparse.Namespace, settings: Settings) -> int:
     else:
         log.warning("alerts disabled — findings will be written to the database only")
 
-    limiter = AdaptiveRateLimiter(settings.rate_limit_rps)
+    limiter = AdaptiveRateLimiter(
+        settings.rate_limit_rps,
+        start_rps=settings.rate_limit_start_rps or None,
+    )
     store = _open_store(args, settings)
 
     try:

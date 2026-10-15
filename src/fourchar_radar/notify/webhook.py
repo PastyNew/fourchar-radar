@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Sequence
 
 import httpx
 
@@ -20,6 +21,8 @@ from ..models import Finding, ScanStats
 from .embed import (
     EmbedDict,
     build_finding_embed,
+    build_progress_embed,
+    build_result_embed,
     build_scan_report_embed,
     build_scan_started_embed,
     build_throttle_embed,
@@ -171,6 +174,36 @@ class WebhookNotifier:
 
     async def notify_throttle(self, retry_after: float, rate_rps: float) -> None:
         await self._post(self._envelope(build_throttle_embed(retry_after, rate_rps)))
+
+    async def notify_progress(
+        self,
+        stats: ScanStats,
+        free_names: Sequence[str] = (),
+        rate_rps: float | None = None,
+        throttles: int = 0,
+    ) -> None:
+        """Say what the scan is doing, even when it has found nothing.
+
+        Without this the channel goes quiet for hours at a stretch, and silence
+        is indistinguishable from a crash.
+        """
+        await self._post(
+            self._envelope(
+                build_progress_embed(
+                    stats, free_names=free_names, rate_rps=rate_rps, throttles=throttles
+                )
+            )
+        )
+
+    async def notify_result(
+        self,
+        name: str,
+        available: bool,
+        price_label: str = "",
+        tier: str = "",
+    ) -> None:
+        """Report the verdict on a single name, free or taken."""
+        await self._post(self._envelope(build_result_embed(name, available, price_label, tier)))
 
     async def notify_started(self, source: str, candidates: object) -> None:
         await self._post(
