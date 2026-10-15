@@ -10,6 +10,7 @@ mechanism that only exercises the packaged copy.
 from __future__ import annotations
 
 from importlib.resources import files
+from pathlib import Path
 
 import pytest
 
@@ -52,3 +53,23 @@ def test_unknown_wordlist_raises_rather_than_returning_nothing() -> None:
 
 def test_py_typed_marker_ships_with_the_package() -> None:
     assert files("fourchar_radar").joinpath("py.typed").is_file()
+
+
+def test_installer_can_install_without_pypi() -> None:
+    """The package is not on PyPI yet, so the one-liner must fall back.
+
+    Without this the advertised `curl | sh` install fails outright for
+    everyone, since `pip install fourchar-radar` finds nothing.
+    """
+    text = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+
+    assert "archive/refs/heads/main.tar.gz" in text, "must have a GitHub fallback"
+    assert "not on PyPI" in text
+    # And it must actually verify the import succeeded, not just trust pip.
+    assert "import fourchar_radar" in text
+
+
+def test_installer_points_at_the_right_repository() -> None:
+    text = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+    assert "PastyNew/fourchar-radar" in text
+    assert "your-org" not in text

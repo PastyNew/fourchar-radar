@@ -51,6 +51,17 @@ First public release.
 
 ### Fixed
 
+- A resumed scan silently skipped every name it already knew, so the user
+  watched a "skipped" counter climb with no output — indistinguishable from a
+  hang. Skipped names are now replayed from the database, once each: free ones
+  always (they are finds the user never heard about), taken ones in
+  `--report-every` mode. Gated on `notified_at`, so a name is announced once
+  and not once per restart.
+- `install.sh` failed outright for everyone using the advertised one-liner:
+  the package is not on PyPI, so `pip install fourchar-radar` found nothing
+  and the script died with "install failed". It now falls back to the GitHub
+  archive and verifies the import actually succeeded before reporting success.
+
 - `run` on Windows raised `RuntimeError` from the signal-handler setup, which
   does not exist on that platform. Registration is now skipped there and the
   `KeyboardInterrupt` path unwinds the run so the summary and the database are

@@ -226,3 +226,60 @@ async def test_empty_source_completes(store: Store) -> None:
 async def test_empty_queue_does_not_hang(store: Store) -> None:
     """Regression guard: queue.join() must resolve when the source is empty."""
     await asyncio.wait_for(_scan(store, _settings(), FakeChecker(), FixedSource([])), timeout=5)
+
+
+# ------------------------------------------------------------ resume replay
+class RecordingNotifier:
+    def __init__(self) -> None:
+        self.results: list[tuple[str, bool]] = []
+
+    async def notify_result(self, name, available, price_label="", tier=""):  # type: ignore[no-untyped-def]
+        self.results.append((name, available))
+
+    async def notify_progress(self, *a, **k) -> None: ...  # type: ignore[no-untyped-def]
+    async def notify(self, f) -> None: ...  # type: ignore[no-untyped-def]
+
+
+async def test_resume_reports_names_it_skipped(store: Store) -> None:
+    """A resumed scan that says nothing looks exactly like a hang.
+
+    Everything already known is skipped for speed, so skipped names must be
+    reported or the user watches a counter climb with no output at all.
+    """
+    names = ["aaaa", "bbbb", "cccc"]
+
+    _, first = await _scan(store, _settings(), FakeChecker(free=set(names)), FixedSource(names))
+    assert first.stats.checked == 3
+
+    resumed = RecordingNotifier()
+    _, report = await _scan(
+        store, _settings(report_every=True), FakeChecker(), FixedSource(names), resumed
+    )
+
+    assert report.stats.skipped == 3
+    assert [n for n, _ in resumed.results] == names
+    assert all(available for _, available in resumed.results)
+
+
+async def test_resume_replay_happens_only_once(store: Store) -> None:
+    """A name must be announced once, not once per restart."""
+    names = ["aaaa", "bbbb"]
+    await _scan(store, _settings(), FakeChecker(free=set(names)), FixedSource(names))
+
+    first = RecordingNotifier()
+    await _scan(store, _settings(report_every=True), FakeChecker(), FixedSource(names), first)
+    assert len(first.results) == 2
+
+    second = RecordingNotifier()
+    await _scan(store, _settings(report_every=True), FakeChecker(), FixedSource(names), second)
+    assert second.results == [], "already reported names must stay quiet"
+
+
+async def test_resume_keeps_taken_names_quiet_by_default(store: Store) -> None:
+    """Taken names are not interesting unless the user asked for every check."""
+    names = ["aaaa", "bbbb"]
+    await _scan(store, _settings(), FakeChecker(free=set()), FixedSource(names))
+
+    notifier = RecordingNotifier()
+    await _scan(store, _settings(), FakeChecker(), FixedSource(names), notifier)
+    assert notifier.results == []

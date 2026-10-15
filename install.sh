@@ -78,26 +78,62 @@ fi
 
 # ------------------------------------------------------------------ pip
 step "Installing fourchar-radar"
-SRC=""
+
+# Where to install from, in order of preference:
+#   1. a checkout we are standing in
+#   2. PyPI
+#   3. the GitHub archive (the package is not on PyPI yet, so this is what
+#      actually runs for everyone using the one-liner)
+REPO_SLUG="PastyNew/fourchar-radar"
+TARBALL="https://github.com/$REPO_SLUG/archive/refs/heads/main.tar.gz"
+
+TARGET=""
 if [ -f "pyproject.toml" ] && [ -d "src/fourchar_radar" ]; then
-    SRC="."   # running from a checkout
-    info "installing from this directory"
+    TARGET="."; info "installing from this directory"
 fi
+
+if [ -z "$TARGET" ]; then
+    info "installing from PyPI"
+    TARGET="fourchar-radar"
+fi
+
+# try_install <python> <extra pip args...>
+try_install() {
+    local py="$1"; shift
+    "$py" -m pip install --quiet "$@" "$TARGET" 2>/dev/null && return 0
+    # PEP 668 (Debian 12+, Fedora 40+) refuses --user installs outright.
+    "$py" -m pip install --quiet "$@" --break-system-packages "$TARGET" 2>/dev/null && return 0
+    return 1
+}
+
+install_ok=0
 
 if [ -n "$BIN" ]; then
     "$VENV/bin/python" -m pip install --quiet --upgrade pip 2>/dev/null || true
-    "$VENV/bin/python" -m pip install --quiet $PIP_ARGS ${SRC:+"$SRC"} \
-        "fourchar-radar" 2>/dev/null \
-    || "$VENV/bin/python" -m pip install --quiet $PIP_ARGS ${SRC:+"$SRC"} \
-    || die "install failed"
+    try_install "$VENV/bin/python" || true
+    # Fall back to the GitHub archive when PyPI has no release yet.
+    if ! "$VENV/bin/python" -c "import fourchar_radar" 2>/dev/null; then
+        info "not on PyPI, using the GitHub archive"
+        try_install "$VENV/bin/python" "$TARBALL" && install_ok=1
+    else
+        install_ok=1
+    fi
 else
     "$PY" -m pip install --quiet --upgrade --user pip 2>/dev/null || true
-    # PEP 668 (Debian 12+, Fedora 40+) blocks plain --user installs. Retry with
-    # the override rather than telling the user to go edit their system Python.
-    "$PY" -m pip install --quiet --user $SRC "fourchar-radar" 2>/dev/null \
-    || "$PY" -m pip install --quiet --user --break-system-packages $SRC "fourchar-radar" 2>/dev/null \
-    || die "install failed. Try creating a virtualenv manually and re-running."
+    try_install "$PY" --user || true
+    if ! "$PY" -c "import fourchar_radar" 2>/dev/null; then
+        info "not on PyPI, using the GitHub archive"
+        try_install "$PY" --user "$TARBALL" && install_ok=1
+    else
+        install_ok=1
+    fi
 fi
+
+[ "$install_ok" = "1" ] || die "install failed.
+
+  Tried: $TARGET
+  You can install from a checkout instead:
+    git clone https://github.com/$REPO_SLUG && cd fourchar-radar && sh install.sh"
 
 # ------------------------------------------------------------------ path
 # A `--user` install drops the console script in ~/.local/bin, which is NOT on

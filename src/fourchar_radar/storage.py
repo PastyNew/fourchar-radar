@@ -149,6 +149,12 @@ class Store:
             ).fetchone()
         return row is not None
 
+    def get(self, name: str) -> Finding | None:
+        """The full recorded verdict for *name*, or ``None`` if never checked."""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM checks WHERE name = ?", (name,)).fetchone()
+        return self._to_finding(row) if row else None
+
     def record(self, verdict: Verdict, quote: Quote | None = None) -> None:
         """Upsert a verdict and its valuation.
 

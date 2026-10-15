@@ -140,6 +140,11 @@ class Scanner:
 
             if self.store.is_checked(name):
                 self.stats.skipped += 1
+                # A resumed scan walks straight past everything already known.
+                # Saying nothing about it looks exactly like a hang, and a free
+                # name found in an earlier run is a find the user never heard
+                # about — so replay whatever was never reported.
+                await self._replay_known(name)
                 continue
 
             # `put` in slices so a stop request is noticed even when the queue
@@ -221,6 +226,35 @@ class Scanner:
         await self._maybe_alert(finding)
         self._log_progress()
         await self._maybe_report()
+
+    async def _replay_known(self, name: str) -> None:
+        """Report a name this scan skipped, if it was never reported before.
+
+        Gated on ``notified_at`` so a name is said once, not once per restart.
+        Free names are always worth replaying — they are findings the user
+        missed. Taken names only come back in per-name mode, where the user
+        asked to hear about every check.
+        """
+        if self.notifier is None or self.store.was_notified(name):
+            return
+
+        finding = self.store.get(name)
+        if finding is None:
+            return
+        if not finding.verdict.available and not self.settings.report_every:
+            return
+
+        log.info(
+            "replaying a previously checked name",
+            extra={"candidate": name, "available": finding.verdict.available},
+        )
+        await self._report_result(
+            name,
+            finding.verdict.available,
+            finding.quote.price_label if finding.verdict.available else "",
+            str(finding.quote.tier) if finding.verdict.available else "",
+        )
+        self.store.mark_notified(name)
 
     async def _report_result(
         self, name: str, available: bool, price_label: str = "", tier: str = ""
