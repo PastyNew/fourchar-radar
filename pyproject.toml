@@ -43,6 +43,7 @@ dev = [
 
 [project.scripts]
 fourchar-radar = "fourchar_radar.cli:main"
+fourchar-radar-tui = "fourchar_radar.tui:main"
 
 [project.urls]
 Homepage = "https://github.com/PastyNew/fourchar-radar"

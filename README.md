@@ -63,6 +63,37 @@ and a hard block is far worse than patience.
 
 ---
 
+## The menu
+
+If you would rather not remember a single flag, there is a menu:
+
+```bash
+fourchar-radar tui          # or: fourchar-radar-tui
+```
+
+```
+  Discord Username Search
+  Developer: PastyNew
+
+  Your webhook: (not set yet)
+
+  1. Change Webhook
+  2. Search for usernames
+  3. Close the program
+
+  Choose 1, 2 or 3:
+```
+
+Press **1** once, paste your webhook, and it is remembered for next time. Then
+**2** starts the search and prints what it finds as it goes — `Ctrl+C` stops it
+whenever you like, and nothing already checked is lost, so **2** again resumes
+where it stopped. **3** closes the program.
+
+Everything the menu does is the same engine the CLI uses; it is a menu, not a
+second implementation.
+
+---
+
 ## Quick start
 
 Paste a webhook URL. That's the whole setup — no config file, no `.env`, no bot
@@ -154,6 +185,18 @@ Everything in `.env.example` still works exactly as documented below; the
 positional URL simply takes precedence.
 
 ### In Russian, коротко
+
+**Если хочешь просто меню, без флагов:**
+
+```bash
+fourchar-radar tui
+```
+
+Откроется меню: вставить вебхук (1), искать (2), выйти (3). Поиск идёт
+прямо в терминале, `Ctrl+C` останавливает, повторный запуск продолжает с
+того же места.
+
+**Либо через терминал, как раньше:**
 
 1. **Установка** — одна строка:
    ```bash

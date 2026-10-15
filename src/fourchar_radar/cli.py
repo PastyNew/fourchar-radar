@@ -176,6 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
     bot.add_argument("--rps", type=float)
     bot.set_defaults(func=cmd_bot)
 
+    # -- tui -------------------------------------------------------------
+    sub.add_parser("tui", help="interactive menu in the terminal", parents=[common]).set_defaults(
+        func=cmd_tui
+    )
+
     return parser
 
 
@@ -644,6 +649,13 @@ def cmd_bot(args: argparse.Namespace, settings: Settings) -> int:
         return asyncio.run(_serve())
     except KeyboardInterrupt:
         return 130
+
+
+# ------------------------------------------------------------------- tui
+def cmd_tui(args: argparse.Namespace, settings: Settings) -> int:
+    from .tui import main as tui_main
+
+    return tui_main()
 
 
 # ------------------------------------------------------------------ entry
