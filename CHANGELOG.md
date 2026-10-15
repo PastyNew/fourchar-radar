@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-10-14
 
-First public release.
+## [1.0.0] — 2026-10-15
+First stable release. Everything below has shipped and is covered by tests.
 
 ### Added
 
+- **Interactive terminal menu** (`fourchar-radar tui`): a numbered 1/2/3 menu
+  drawn in the terminal — change webhook, search, quit. No flags, no config
+  file. The scan runs in a worker thread so the menu stays responsive, `Ctrl+C`
+  stops it promptly, and every message reaches Discord *and* the terminal.
 - **Availability checking** against Discord's public username endpoint
   (`POST /api/v9/unique-username/username-attempt-unauthed`), with a distinct
   policy for 200 / 400 / 429 / 5xx.
@@ -36,21 +40,6 @@ First public release.
 - **CI** running ruff, `mypy --strict` and pytest on Python 3.11–3.13, plus a
   Docker build check.
 
-### Changed
-
-- **The webhook is now a positional argument.** `fourchar-radar run <url>` is
-  the intended usage and needs no config file; `.env` and
-  `DISCORD_WEBHOOK_URL` still work and are simply lower precedence.
-- The database moved from a relative `state/radar.db` to the OS per-user data
-  directory (XDG / `~/Library/Application Support` / `%LOCALAPPDATA%`), so the
-  radar no longer starts "fresh" when launched from a different directory by
-  systemd or cron.
-- Added `install.sh` and `install.ps1`: no-root, one-command bootstrap for any
-  Linux distro and for Windows, with fallbacks for distros missing `ensurepip`
-  and for those enforcing PEP 668.
-
-### Added
-
 - **Proxy pool.** `--proxy` (repeatable), `--proxy-file`, and `RADAR_PROXY_LIST`.
   The endpoint's limit is per IP, so N ready proxies mean N budgets and the
   pacing budget scales with them. A proxy Discord throttles is parked for
@@ -63,18 +52,6 @@ First public release.
 - MTProto is rejected with an explanation: it is a Telegram transport and will
   not connect to Discord. SOCKS4/5 and HTTP/HTTPS proxies are supported.
 - `[socks]` extra for SOCKS proxy support.
-
-### Fixed
-
-- A scan doing one check every ~2 minutes looked broken: the screen sat still
-  with no indication anything was happening. The progress card and the
-  terminal heartbeat now state "Next check in 2.2m" and "Estimated left ~3.6d
-  (2,396 names)", and the scanner tracks how many candidates are still
-  outstanding so the estimate is real rather than decorative. No estimate is
-  shown when the total is unknown (stdin) or the rate is zero, rather than a
-  made-up one.
-
-### Added
 
 - A resumed scan silently skipped every name it already knew, so the user
   watched a "skipped" counter climb with no output — indistinguishable from a
@@ -111,8 +88,33 @@ First public release.
 - `Store.close()` was awaited despite being synchronous, masking the real exit
   code of every scan.
 
+### Changed
+- **The webhook is now a positional argument.** `fourchar-radar run <url>` is
+  the intended usage and needs no config file; `.env` and
+  `DISCORD_WEBHOOK_URL` still work and are simply lower precedence.
+- The database moved from a relative `state/radar.db` to the OS per-user data
+  directory (XDG / `~/Library/Application Support` / `%LOCALAPPDATA%`), so the
+  radar no longer starts "fresh" when launched from a different directory by
+  systemd or cron.
+- Added `install.sh` and `install.ps1`: no-root, one-command bootstrap for any
+  Linux distro and for Windows, with fallbacks for distros missing `ensurepip`
+  and for those enforcing PEP 668.
+
+### Fixed
+- A scan doing one check every ~2 minutes looked broken: the screen sat still
+  with no indication anything was happening. The progress card and the
+  terminal heartbeat now state "Next check in 2.2m" and "Estimated left ~3.6d
+  (2,396 names)", and the scanner tracks how many candidates are still
+  outstanding so the estimate is real rather than decorative. No estimate is
+  shown when the total is unknown (stdin) or the rate is zero, rather than a
+  made-up one.
+
 ### Known limitations
 
+- Throughput is the binding constraint and it is not a defect: the public
+  endpoint is burst-and-penalise (~16 requests, then a ~35-minute lockout), so
+  one IP sustains ~0.0076 req/s. A full `bruteforce` sweep is out of reach by
+  design; use proxies, or a wordlist.
 - Throughput is **tens of checks per hour**, not thousands. The public
   endpoint is burst-and-penalise: ~16 requests succeed, then a ~35-minute
   `retry_after` lockout, and the cycle repeats. Lowering the rate does not
@@ -128,3 +130,4 @@ First public release.
   extra requests are made.
 - Whether a long-idle IP is ever granted a steady (non-burst) allowance is
   unconfirmed. The documentation assumes the worst case on purpose.
+

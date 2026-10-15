@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fourchar-radar"
-version = "0.1.0"
+version = "1.0.0"
 description = "Radar for free 4-character Discord usernames: availability checks, price estimation and webhook alerts."
 readme = "README.md"
 license = { file = "LICENSE" }
