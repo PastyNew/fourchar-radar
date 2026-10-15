@@ -15,6 +15,16 @@ make dev          # pip install -e ".[bot,dev]"
 make check        # ruff + mypy + pytest — exactly what CI runs
 ```
 
+> **Install the extras before trusting mypy.** The bot mode is optional, so
+> without `discord.py` installed every discord type resolves to `Any` and
+> `bot.py` type-checks as clean while containing real errors. Three of them
+> reached `main` this way and were only caught by CI. `make dev` (or
+> `uv sync --all-extras`) is the supported way to work on this project.
+
+The same applies to the test suite: `tests/test_bot_wiring.py` skips the
+discord import when the extra is absent, so a bare `pip install -e .` leaves
+that file partly untested.
+
 All three are configured strictly. `mypy --strict` and the `ruff` rule set
 (incl. `S` for bandit-style security checks) are not negotiable; if a rule is
 wrong for this codebase, change the config with a comment explaining why,

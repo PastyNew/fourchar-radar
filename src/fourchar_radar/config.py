@@ -11,7 +11,7 @@ Design notes:
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,7 +20,12 @@ from .errors import ConfigError
 from .models import TIER_ORDER, Tier
 from .platforms import default_db_path
 
+#: Valid values for ``Settings.source``. Exported so the bot's slash-command
+#: choices are checked against the same set the config validates against.
 SourceName = Literal["wordlist", "bruteforce", "stdin", "file"]
+
+#: Runtime tuple of :data:`SourceName`, for iterating (e.g. building CLI choices).
+SOURCE_NAMES: tuple[SourceName, ...] = get_args(SourceName)
 
 #: Discord only accepts these in a username (plus `.`), length 2..32.
 USERNAME_RE = r"^[a-z0-9_.]{2,32}$"

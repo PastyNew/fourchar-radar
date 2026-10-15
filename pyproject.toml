@@ -80,6 +80,11 @@ packages = ["fourchar_radar"]
 strict = true
 warn_unreachable = true
 
+# `ignore_missing_imports` for the bot extra is deliberately NOT a substitute for
+# installing it. With discord.py absent, every discord type resolves to `Any`,
+# mypy has nothing to check, and bot.py looks clean while being wrong. Always
+# `make dev` (or `uv sync --all-extras`) before trusting a mypy run.
+
 [[tool.mypy.overrides]]
 module = ["discord.*"]
 ignore_missing_imports = true

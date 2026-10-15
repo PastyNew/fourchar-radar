@@ -22,12 +22,13 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..checking.client import DiscordAvailabilityClient
 from ..checking.ratelimit import AdaptiveRateLimiter
 from ..checking.scanner import Scanner, ScanReport
-from ..config import Settings
+from ..config import SOURCE_NAMES, Settings
+from ..errors import InvalidWebhook
 from ..models import Finding, Tier
 from ..pricing.estimator import estimate
 from ..sources import build_source
@@ -91,7 +92,13 @@ class RadarBot:
 
     # --------------------------------------------------------- lifecycle
     async def start(self) -> None:
-        await self._discord.start(self.settings.discord_bot_token)
+        token = self.settings.discord_bot_token
+        if not token:
+            raise InvalidWebhook(
+                "bot mode needs DISCORD_BOT_TOKEN. Webhook mode needs no token at "
+                "all — see 'fourchar-radar run <url>'."
+            )
+        await self._discord.start(token)
 
     async def close(self) -> None:
         self.scanner.stop()
@@ -110,22 +117,31 @@ class RadarBot:
         await self._resolve_channel()  # fail fast if we cannot deliver
 
     async def _resolve_channel(self) -> discord.abc.Messageable | None:
-        """Where alerts go: configured channel, else the first available one."""
+        """Where alerts go: configured channel, else the first writable one.
+
+        ``get_channel`` returns any channel type, and ``guild.text_channels``
+        is a union that includes categories and threads — none of which are
+        guaranteed to be messageable, so the type is narrowed explicitly
+        rather than asserted at the return.
+        """
         if self._discord.is_closed():
             return None
+
         if self.settings.discord_command_channel_id:
             channel = self._discord.get_channel(self.settings.discord_command_channel_id)
-            if channel is not None:
+            if isinstance(channel, discord.abc.Messageable):
                 return channel
             log.warning(
-                "configured alert channel %s not found",
+                "configured alert channel %s not found or not a text channel",
                 self.settings.discord_command_channel_id,
             )
+
         for guild in self._discord.guilds:
             for channel in guild.text_channels:
                 if channel.permissions_for(guild.me).send_messages:
                     log.info("using fallback channel #%s", channel)
                     return channel
+
         log.warning("no writable text channel found; alerts will fail")
         return None
 
@@ -267,7 +283,15 @@ class RadarBot:
                 )
                 return
             if source:
-                self.settings.source = source.value
+                # Choices are declared from the same set the config validates
+                # against, but re-checking here means the two cannot silently
+                # drift apart into an unvalidated assignment.
+                if source.value not in SOURCE_NAMES:
+                    await interaction.response.send_message(
+                        f"Unknown source `{source.value}`.", ephemeral=True
+                    )
+                    return
+                self.settings.source = cast("Any", source.value)
             self.settings.length = max(2, min(length, 32))
             self.settings.rate_limit_rps = max(0.01, min(rate, 20.0))
             self.settings.concurrency = 1
