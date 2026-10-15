@@ -80,14 +80,15 @@ async def test_4xx_raises_with_a_redacted_url(
     recorder = Recorder([httpx.Response(400, text="bad webhook")])
     notifier, http = _notifier(monkeypatch, recorder)
 
-    with pytest.raises(RuntimeError) as excinfo:
+    # InvalidWebhook, not RuntimeError: only RadarError subclasses are caught by
+    # main(), so anything else reaches the user as an unhandled traceback.
+    with pytest.raises(InvalidWebhook) as excinfo:
         await notifier.notify(make_finding("cool"))
     await http.aclose()
 
     message = str(excinfo.value)
-    assert "400" in message
-    assert "secret-token" not in message, "the webhook token must never surface in errors"
     assert "bad webhook" in message
+    assert "secret-token" not in message, "the webhook token must never surface in errors"
 
 
 async def test_429_is_retried_after_the_requested_delay(
@@ -123,11 +124,25 @@ async def test_requires_a_webhook_url() -> None:
         WebhookNotifier(Settings(discord_webhook_url=""))
 
 
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (404, {"message": "Unknown Webhook", "code": 10015}, "Unknown Webhook"),
+        (401, {"message": "401: Unauthorized"}, "Unauthorized"),
+        # The exact response Discord gives when someone copies the README's
+        # example URL verbatim. Reported as a raw traceback before.
+        (400, {"webhook_id": ['Value "ID" is not snowflake.']}, "not a real webhook id"),
+    ],
+)
 async def test_rejected_webhook_raises_an_actionable_error(
-    monkeypatch: pytest.MonkeyPatch, make_finding
-) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+    make_finding,  # type: ignore[no-untyped-def]
+    status: int,
+    body: dict,
+    expected: str,
+) -> None:
     """A wrong URL must fail loudly at startup, not hours into a scan."""
-    recorder = Recorder([httpx.Response(404, json={"message": "Unknown Webhook", "code": 10015})])
+    recorder = Recorder([httpx.Response(status, json=body)])
     notifier, http = _notifier(monkeypatch, recorder)
 
     with pytest.raises(InvalidWebhook) as excinfo:
@@ -135,9 +150,53 @@ async def test_rejected_webhook_raises_an_actionable_error(
     await http.aclose()
 
     message = str(excinfo.value)
-    assert "Unknown Webhook" in message
+    assert expected in message
     assert "secret-token" not in message, "the token must never appear in the error"
     assert "--dry-run" in message, "the user needs a way forward"
+
+
+async def test_readme_placeholder_url_is_called_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copying the example URL is the single most likely first mistake."""
+    from fourchar_radar.config import Settings
+    from fourchar_radar.notify.webhook import WebhookNotifier
+
+    settings = Settings(discord_webhook_url="https://discord.com/api/webhooks/ID/TOKEN")
+    recorder = Recorder(
+        [httpx.Response(400, json={"webhook_id": ['Value "ID" is not snowflake.']})]
+    )
+    http = httpx.AsyncClient(transport=httpx.MockTransport(recorder))
+    notifier = WebhookNotifier(settings, client=http)
+
+    with pytest.raises(InvalidWebhook) as excinfo:
+        await notifier.verify()
+    await http.aclose()
+
+    assert "README" in str(excinfo.value)
+
+
+async def test_no_webhook_error_escapes_as_a_raw_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every webhook failure must be a RadarError, or `main` cannot catch it.
+
+    A bare RuntimeError propagates as an unhandled traceback, which is exactly
+    what a user hitting a bad URL should never have to read.
+    """
+    from fourchar_radar.errors import RadarError
+
+    for status, body in [
+        (400, {"webhook_id": ["nope"]}),
+        (404, {"message": "Unknown Webhook"}),
+        (500, {"message": "internal"}),
+        (403, {"message": "forbidden"}),
+    ]:
+        recorder = Recorder([httpx.Response(status, json=body)])
+        notifier, http = _notifier(monkeypatch, recorder)
+        with pytest.raises(RadarError):
+            await notifier.verify()
+        await http.aclose()
 
 
 async def test_verify_sends_a_probe(monkeypatch: pytest.MonkeyPatch) -> None:

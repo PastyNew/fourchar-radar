@@ -99,20 +99,56 @@ else
     || die "install failed. Try creating a virtualenv manually and re-running."
 fi
 
+# ------------------------------------------------------------------ path
+# A `--user` install drops the console script in ~/.local/bin, which is NOT on
+# PATH on most distros by default. Detect that, create the launcher if pip did
+# not, and tell the user exactly what to run — or do it for them.
+USER_BIN="$HOME/.local/bin"
+
+if [ -z "$BIN" ]; then
+    step "Checking the launcher is on PATH"
+
+    if ! command -v fourchar-radar >/dev/null 2>&1; then
+        # pip puts the script here, but only if the user bin dir exists first.
+        if [ ! -x "$USER_BIN/fourchar-radar" ]; then
+            mkdir -p "$USER_BIN"
+            PYTHON_BIN="$("$PY" -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user"))')"
+            if [ -x "$PYTHON_BIN/fourchar-radar" ]; then
+                cp "$PYTHON_BIN/fourchar-radar" "$USER_BIN/fourchar-radar"
+                chmod +x "$USER_BIN/fourchar-radar"
+                info "created $USER_BIN/fourchar-radar"
+            fi
+        fi
+
+        if ! command -v fourchar-radar >/dev/null 2>&1; then
+            printf '\n'
+            printf '%sPATH is not set up yet.%s Nothing else is wrong — run this:\n\n' \
+                "${RED}" "${RESET}"
+            printf '    export PATH="$HOME/.local/bin:$PATH"\n\n'
+            printf 'and to make it permanent:\n\n'
+            printf "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc\n\n"
+            printf 'then re-run %sfourchar-radar --version%s to confirm.\n\n' "$BOLD" "$RESET"
+            exit 1
+        fi
+    else
+        info "found at $(command -v fourchar-radar)"
+    fi
+fi
+
 # ------------------------------------------------------------------ link
 if [ -n "$BIN" ]; then
     step "Linking the launcher into ~/.local/bin"
-    mkdir -p "$HOME/.local/bin"
-    LAUNCHER="$HOME/.local/bin/fourchar-radar"
+    mkdir -p "$USER_BIN"
+    LAUNCHER="$USER_BIN/fourchar-radar"
     printf '#!/bin/sh\nexec "%s" "$@"\n' "$VENV/bin/fourchar-radar" > "$LAUNCHER"
     chmod +x "$LAUNCHER"
     case ":$PATH:" in
-        *":$HOME/.local/bin:"*) ;;
-        *) info "add to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+        *":$USER_BIN:"*) ;;
+        *)
+            info "note: ~/.local/bin is not on your PATH"
+            info "add it with:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+            ;;
     esac
-    COMMAND="$LAUNCHER"
-else
-    COMMAND="$(command -v fourchar-radar || echo "$HOME/.local/bin/fourchar-radar")"
 fi
 
 # ------------------------------------------------------------------ done

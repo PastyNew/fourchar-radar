@@ -75,6 +75,8 @@ class WebhookNotifier:
 
         if response.status_code >= 400:
             detail = response.text[:200]
+            safe_url = redact_webhook(self.settings.discord_webhook_url)
+
             if response.status_code == 429:
                 # Respect the server and retry once, later.
                 retry_after = 1.0
@@ -84,22 +86,40 @@ class WebhookNotifier:
                 await self._post(payload)
                 return
 
-            safe_url = redact_webhook(self.settings.discord_webhook_url)
-            if response.status_code in (401, 403, 404) or "Unknown Webhook" in detail:
-                # Almost always a stale or mistyped URL rather than a Discord
-                # outage, and a bad URL means *every* alert will fail.
-                raise InvalidWebhook(
-                    f"Discord rejected the webhook: {detail}\n"
-                    f"  url: {safe_url}\n"
-                    "  The URL looks wrong or the webhook was deleted. Recreate it:\n"
-                    "  channel -> Edit Channel -> Integrations -> Webhooks -> "
-                    "New Webhook -> Copy Webhook URL,\n"
-                    "  then paste it into DISCORD_WEBHOOK_URL in your .env.\n"
-                    "  To scan without alerting, run with --dry-run."
-                )
-            raise RuntimeError(
-                f"webhook returned HTTP {response.status_code}: {detail} (url={safe_url})"
-            )
+            # Every failure here is about the URL, not the payload: a bad
+            # webhook means *every* alert would fail, so it has to stop the
+            # scan before the first hour-long one is wasted on it.
+            raise InvalidWebhook(self._explain_failure(response.status_code, detail, safe_url))
+
+    @staticmethod
+    def _explain_failure(status: int, detail: str, safe_url: str) -> str:
+        """Turn a webhook rejection into something the user can act on."""
+        lines = [f"Discord rejected the webhook: {detail}", f"  url: {safe_url}"]
+
+        if "not snowflake" in detail.lower():
+            # The README example is literally ".../ID/TOKEN", and copying it
+            # verbatim is by far the most likely mistake.
+            lines += [
+                "",
+                "  That ID is not a real webhook id — this looks like the example URL",
+                "  from the README was copied as-is. Replace ID/TOKEN with the values",
+                "  from your own webhook.",
+            ]
+        elif status in (401, 403, 404) or "Unknown Webhook" in detail:
+            lines += [
+                "",
+                "  The webhook was deleted, or the URL is from another server/channel.",
+            ]
+        else:
+            lines += ["", "  The request was rejected; the details above come from Discord."]
+
+        lines += [
+            "",
+            "  Get a working URL: channel -> Edit Channel -> Integrations ->",
+            "  Webhooks -> New Webhook -> Copy Webhook URL.",
+            "  To scan without alerting, run with --dry-run.",
+        ]
+        return "\n".join(lines)
 
     def _envelope(self, embed: EmbedDict) -> EmbedDict:
         """Wrap an embed in the webhook payload envelope.

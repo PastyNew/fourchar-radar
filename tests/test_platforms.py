@@ -247,6 +247,34 @@ def test_installer_mentions_the_fallbacks() -> None:
     assert "python3-venv" in text, "and tell the user how to fix it"
 
 
+def test_installer_checks_path_in_the_user_branch() -> None:
+    """`pip install --user` puts the script somewhere not on PATH by default.
+
+    The --user branch must therefore verify the launcher is reachable and say
+    how to fix PATH if not, rather than reporting success and leaving the user
+    with 'command not found'.
+    """
+    text = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+
+    assert "Checking the launcher is on PATH" in text
+    assert ".local/bin" in text
+    # The exact instruction the user needs, not a vague hint.
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in text
+    assert "~/.bashrc" in text
+    # And it must be able to fail loudly instead of pretending to succeed.
+    assert "PATH is not set up yet" in text
+
+
+def test_installer_does_not_reference_removed_variables() -> None:
+    """A stale variable reference would only fail on someone's machine."""
+    text = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+    # $COMMAND was dropped when the launcher handling was rewritten.
+    assert "COMMAND" not in text, "stale $COMMAND reference left behind"
+    # The venv path is only meaningful when a venv was actually created.
+    assert 'BIN="$VENV/bin/fourchar-radar"' in text
+    assert 'BIN=""' in text, "the --user branch must leave BIN empty"
+
+
 def test_posix_path_env_does_not_leak_into_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     """XDG must be ignored on Windows even if it happens to be set."""
     monkeypatch.setattr(platforms, "IS_WINDOWS", True)
