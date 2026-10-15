@@ -456,6 +456,25 @@ WantedBy=multi-user.target
 
 ## Bot mode (optional)
 
+Bot mode changes the **interface**, not the throughput. The scan still uses
+the same public endpoint from the same IP, so it runs at the same rate — what
+it buys is not having to keep a terminal open for a scan that takes days.
+`/scan start` and walk away; results land in the channel; `/top` on demand.
+
+**What a bot token does *not* do:** Discord's API has no endpoint for
+username availability. The address the radar uses is the web client's
+registration check, not Bot API, so a bot token neither speeds it up nor can
+call it. The limit is per IP, and a token is not an IP.
+
+```
+/scan start   start or resume a scan
+/scan stop    stop it
+/status       progress, rate, and how long the next check is
+/top          best free usernames found so far
+/price <name> check one name and value it
+```
+
+
 ```bash
 pip install -e ".[bot]"
 export DISCORD_BOT_TOKEN=...

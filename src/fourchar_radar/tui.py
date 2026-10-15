@@ -32,6 +32,7 @@ from .config import Settings
 from .errors import ConfigError, InvalidWebhook
 from .logging_setup import setup_logging
 from .models import ScanStats
+from .notify.embed import duration as _duration
 from .notify.webhook import WebhookNotifier, redact_webhook
 from .platforms import IS_WINDOWS, user_data_dir
 from .sources import build_source
@@ -582,15 +583,6 @@ class _DualNotifier:
 
     async def close(self) -> None:
         await self._webhook.close()
-
-
-def _duration(seconds: float) -> str:
-    """Human duration, escalating to days for multi-day scans."""
-    for size, unit in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
-        if seconds >= size:
-            value = seconds / size
-            return f"{value:.0f}{unit}" if value >= 10 or unit == "s" else f"{value:.1f}{unit}"
-    return f"{seconds:.0f}s"
 
 
 def _stats_line(stats: ScanStats) -> str:

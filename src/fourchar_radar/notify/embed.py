@@ -17,7 +17,7 @@ from ..models import TIER_COLORS, Finding, ScanStats, Tier
 EmbedDict = dict[str, Any]
 
 
-def _duration(seconds: float) -> str:
+def duration(seconds: float) -> str:
     """Human duration, escalating to days for multi-day scans."""
     for size, unit in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
         if seconds >= size:
@@ -112,12 +112,12 @@ def build_progress_embed(
     if rate_rps and rate_rps > 0:
         # The single most useful field on this card. One check every two
         # minutes looks exactly like a hang without it.
-        fields.append({"name": "Next check in", "value": _duration(1 / rate_rps), "inline": True})
+        fields.append({"name": "Next check in", "value": duration(1 / rate_rps), "inline": True})
     if remaining and rate_rps and rate_rps > 0:
         fields.append(
             {
                 "name": "Estimated left",
-                "value": f"~{_duration(remaining / rate_rps)} ({remaining:,} names)",
+                "value": f"~{duration(remaining / rate_rps)} ({remaining:,} names)",
                 "inline": True,
             }
         )

@@ -33,6 +33,7 @@ from ..models import Finding, Tier
 from ..pricing.estimator import estimate
 from ..sources import build_source
 from .embed import TIER_EMOJI, EmbedDict, build_finding_embed
+from .embed import duration as _duration
 
 log = logging.getLogger(__name__)
 
@@ -248,13 +249,20 @@ class RadarBot:
             blocked = f"{snap.blocked_for_s:.0f}s"
             text = (
                 f"**Scanning:** {'yes' if self.scanning else 'no'}\n"
-                f"**Checked:** {stats.checked:,} · **free:** {stats.found:,} · "
-                f"**alerts:** {stats.alerts_sent:,}\n"
+                f"**Checked:** {stats.checked:,} · **taken:** {stats.taken:,} · "
+                f"**free:** {stats.found:,} · **skipped:** {stats.skipped:,}\n"
                 f"**Rate:** {snap.rate_rps:.4f} r/s "
                 f"(ceiling {snap.ceiling_rps:.2f})\n"
                 f"**Throttles:** {snap.throttles} · **blocked for:** {blocked}\n"
                 f"**DB:** {summary['total']:,} checked · {summary['free']:,} free"
             )
+            # At one check every two minutes a bare rate is not enough to tell
+            # a working scan from a stuck one.
+            if snap.rate_rps > 0:
+                text += f"\n**Next check in:** {_duration(1 / snap.rate_rps)}"
+            remaining = getattr(self.scanner, "_remaining", None)
+            if remaining and snap.rate_rps > 0:
+                text += f"\n**Estimated left:** ~{_duration(remaining / snap.rate_rps)}"
             await interaction.followup.send(text, ephemeral=True)
 
         scan = app_commands.Group(name="scan", description="Control the background scan")
