@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+
+  types:
+    name: types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run mypy
+
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run pytest --cov=fourchar_radar --cov-report=term-missing
+      - name: Verify the package builds
+        run: uv build
+
+  # The installers are the front door for most users, so their shell syntax is
+  # checked rather than trusted.
+  installers:
+    name: installers parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: POSIX shell syntax
+        run: sh -n install.sh
+      - name: Windows install script parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path install.ps1), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | Out-String | Write-Error; exit 1 }
+
+  # Guards against publishing a checkout that still has placeholder links,
+  # which would make the one-line installer point at someone else's repo.
+  placeholders:
+    name: no placeholder links
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if placeholder links remain
+        run: |
+          # Built from parts so this file does not match its own pattern.
+          pattern="your-""org"
+          if grep -rn "$pattern" --include="*.toml" --include="*.md" \
+               --include="*.sh" --include="*.ps1" .; then
+            echo "::error::run 'python scripts/set_repo.py --user <name>' first"
+            exit 1
+          fi
+          echo "all repository links are real"
+
+  docker:
+    name: docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t fourchar-radar:ci .
+      - run: docker run --rm fourchar-radar:ci --version
+      - run: docker run --rm fourchar-radar:ci sources

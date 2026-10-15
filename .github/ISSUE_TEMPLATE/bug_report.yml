@@ -1,0 +1,65 @@
+name: Bug report
+
+description: Something behaves differently from what the README promises
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: `fourchar-radar --version` and the output of
+        `fourchar-radar --log-json status` are the two most useful things
+        to include. If the problem is a scan that "found nothing", see
+        the rate-limit section of the README first — that is usually it.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "fourchar-radar 0.1.0 (Python 3.12.4)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The exact command, plus the relevant part of your .env with secrets removed.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output from `--log-json`, or the last ~50 lines.
+      render: shell
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Which source were you scanning?
+    options:
+      - wordlist
+      - bruteforce
+      - file
+      - stdin
+      - not scanning
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I redacted my webhook URL and bot token from anything above.
+          required: true

@@ -1,0 +1,109 @@
+"""Discord embed rendering.
+
+Plain dicts rather than ``discord.Embed`` so the webhook path stays free of
+the discord.py dependency.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC
+from typing import Any
+
+from ..models import TIER_COLORS, Finding, ScanStats, Tier
+
+#: A Discord embed payload. Deliberately loose: Discord adds fields regularly
+#: and pinning the exact shape would break on every new one.
+EmbedDict = dict[str, Any]
+
+BRAND = "fourchar-radar"
+EMBED_FOOTER = "Heuristic estimate — not a market valuation."
+TIER_EMOJI: dict[Tier, str] = {
+    Tier.COMMON: "⚪",
+    Tier.UNCOMMON: "🟢",
+    Tier.RARE: "🔵",
+    Tier.EPIC: "🟣",
+    Tier.LEGENDARY: "🟡",
+}
+
+
+def _tier_label(tier: Tier) -> str:
+    return f"{TIER_EMOJI[tier]} {tier.value.upper()}"
+
+
+def build_finding_embed(finding: Finding) -> EmbedDict:
+    """The alert a human actually reads."""
+    quote, verdict = finding.quote, finding.verdict
+    checked = verdict.checked_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+    return {
+        "title": f"🎯 `{quote.name}` is free",
+        "description": "\n".join(f"• {reason}" for reason in quote.reasons),
+        "color": TIER_COLORS[quote.tier],
+        "fields": [
+            {"name": "Estimated value", "value": quote.price_label, "inline": True},
+            {"name": "Tier", "value": _tier_label(quote.tier), "inline": True},
+            {"name": "Score", "value": f"{quote.score:,.0f}", "inline": True},
+            {"name": "Checked at", "value": checked, "inline": True},
+            {"name": "Latency", "value": f"{verdict.latency_ms:.0f} ms", "inline": True},
+            {"name": "Claim", "value": "discord.com/new", "inline": True},
+        ],
+        "footer": {"text": f"{BRAND} · {EMBED_FOOTER}"},
+        "timestamp": verdict.checked_at.astimezone(UTC).isoformat(),
+    }
+
+
+def build_throttle_embed(retry_after: float, rate_rps: float) -> EmbedDict:
+    """Shown when Discord hands back a long penalty."""
+    minutes = retry_after / 60
+    return {
+        "title": "⏳ Throttled by Discord",
+        "description": (
+            f"The public endpoint asked us to wait **{minutes:.0f} min**.\n"
+            "The scan is still running — it will resume on its own."
+        ),
+        "color": 0xF39C12,
+        "fields": [
+            {"name": "Retry after", "value": f"{retry_after:,.0f}s", "inline": True},
+            {"name": "New rate", "value": f"{rate_rps:.3f} req/s", "inline": True},
+        ],
+        "footer": {"text": f"{BRAND} · this is normal, not an error"},
+    }
+
+
+def build_scan_started_embed(source: str, candidates: object, rps: float) -> EmbedDict:
+    return {
+        "title": "📡 Radar online",
+        "description": f"Scanning `{source}` for free usernames.",
+        "color": 0x5865F2,
+        "fields": [
+            {
+                "name": "Candidates",
+                "value": f"{candidates:,}" if isinstance(candidates, int) else "∞",
+                "inline": True,
+            },
+            {"name": "Rate ceiling", "value": f"{rps:.2f} req/s", "inline": True},
+        ],
+        "footer": {"text": f"{BRAND}"},
+    }
+
+
+def build_scan_report_embed(stats: ScanStats, stopped_early: bool = False) -> EmbedDict:
+    reason = " (stopped early)" if stopped_early else ""
+    return {
+        "title": f"📊 Scan complete{reason}",
+        "color": 0x95A5A6,
+        "fields": [
+            {"name": "Checked", "value": f"{stats.checked:,}", "inline": True},
+            {"name": "Taken", "value": f"{stats.taken:,}", "inline": True},
+            {"name": "Free", "value": f"{stats.found:,}", "inline": True},
+            {"name": "Skipped", "value": f"{stats.skipped:,}", "inline": True},
+            {"name": "Errors", "value": f"{stats.errors:,}", "inline": True},
+            {"name": "Alerts sent", "value": f"{stats.alerts_sent:,}", "inline": True},
+            {
+                "name": "Observed rate",
+                "value": f"{stats.rps:.4f} req/s over {stats.elapsed_s / 60:.1f} min",
+                "inline": False,
+            },
+        ],
+        "footer": {"text": f"{BRAND}"},
+    }

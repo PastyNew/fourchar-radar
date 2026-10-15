@@ -1,0 +1,30 @@
+name: Config
+description: Local development configuration
+labels: ["config"]
+
+body:
+  - type: input
+    id: purpose
+    attributes:
+      label: What is this configuration for?
+    validations:
+      required: true
+
+  - type: textarea
+    id: yaml
+    attributes:
+      label: ".env contents"
+      description: The literal contents of your `.env`, with secrets redacted.
+      render: dotenv
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+    options:
+      - CLI
+      - systemd
+      - Docker / Docker Compose
+      - Other

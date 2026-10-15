@@ -1,0 +1,42 @@
+name: Feature request
+
+description: Suggest a capability or an improvement
+labels: ["enhancement", "needs triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is awkward or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: A sketch is fine. Describe behaviour, not implementation.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+    options:
+      - Candidate sources
+      - Rate limiting / scheduling
+      - Pricing model
+      - Alerting (webhook / bot)
+      - Storage and history
+      - CLI ergonomics
+      - Documentation
+      - Something else
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

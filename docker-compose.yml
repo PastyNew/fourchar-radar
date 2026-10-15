@@ -1,0 +1,32 @@
+services:
+  radar:
+    build: .
+    image: fourchar-radar:latest
+    container_name: fourchar-radar
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    # Findings survive restarts; the DB is the resume state.
+    volumes:
+      - ./state:/app/state
+
+    # SIGTERM is what the CLI's graceful-shutdown path hooks, so it needs to
+    # actually reach PID 1 rather than being swallowed.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+    # Logging in JSON, one object per line, ready for journald/loki.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # The scan is I/O-bound on a throttled endpoint; it does not need cores.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
