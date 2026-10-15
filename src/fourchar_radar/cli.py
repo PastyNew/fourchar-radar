@@ -45,6 +45,7 @@ from .platforms import supports_signal_handlers
 from .pricing.estimator import estimate
 from .sources import build_source
 from .storage import Store
+from .wiring import build_limiter, build_pool
 
 log = logging.getLogger("fourchar_radar")
 
@@ -109,6 +110,22 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--min-tier", choices=TIER_ORDER_LIST, help="only alert at or above this tier")
     run.add_argument("--min-price", type=int, help="only alert at or above this USD")
     run.add_argument("--cooldown", type=float, help="minimum seconds between alerts")
+    run.add_argument(
+        "--proxy",
+        action="append",
+        metavar="URL",
+        help=(
+            "route through this proxy; repeat for several. Each has its own "
+            "rate budget, so N proxies mean about N times the throughput. "
+            "http://, https://, socks5://, socks4://"
+        ),
+    )
+    run.add_argument("--proxy-file", help="read proxies from a file, one per line")
+    run.add_argument(
+        "--test-proxies",
+        action="store_true",
+        help="check the proxies work and exit, without scanning",
+    )
     run.add_argument("--dry-run", action="store_true", help="scan but never post")
     run.add_argument(
         "--report-every",
@@ -237,6 +254,12 @@ def _apply_overrides(args: argparse.Namespace, settings: Settings) -> Settings:
     if positional:
         overrides["discord_webhook_url"] = positional.strip()
 
+    proxies = getattr(args, "proxy", None)
+    if proxies:
+        overrides["proxy_list"] = ",".join(proxies)
+    if getattr(args, "proxy_file", None):
+        overrides["proxy_file"] = args.proxy_file
+
     if getattr(args, "min_price", None):
         overrides["alert_min_tier"] = _tier_for_price(int(args.min_price))
     if getattr(args, "log_json", False):
@@ -274,6 +297,9 @@ def _open_store(args: argparse.Namespace, settings: Settings) -> Store:
 # ------------------------------------------------------------------- run
 def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     settings = _apply_overrides(args, settings)
+    # Proxy checking is a diagnostic: it has to work before a webhook exists.
+    if getattr(args, "test_proxies", False):
+        return cmd_test_proxies(args, settings)
     try:
         return asyncio.run(_run_async(args, settings))
     except KeyboardInterrupt:
@@ -301,14 +327,14 @@ async def _run_async(args: argparse.Namespace, settings: Settings) -> int:
     else:
         log.warning("alerts disabled — findings will be written to the database only")
 
-    limiter = AdaptiveRateLimiter(
-        settings.rate_limit_rps,
-        start_rps=settings.rate_limit_start_rps or None,
-    )
+    pool = build_pool(settings)
+    if pool:
+        log.info("proxies: %s", pool.summary())
+    limiter = build_limiter(settings, pool)
     store = _open_store(args, settings)
 
     try:
-        async with DiscordAvailabilityClient(settings, limiter) as client:
+        async with DiscordAvailabilityClient(settings, limiter, pool=pool) as client:
             scanner = Scanner(settings, store, client, limiter, notifier)
             _install_signal_handlers(scanner)
 
@@ -680,6 +706,88 @@ def cmd_bot(args: argparse.Namespace, settings: Settings) -> int:
         return asyncio.run(_serve())
     except KeyboardInterrupt:
         return 130
+
+
+# ---------------------------------------------------------------- proxies
+def _probe_proxy(url: str, timeout: float = 12.0) -> tuple[bool, str]:
+    """One request through *url*, reporting what happened.
+
+    Deliberately the real availability endpoint: a proxy that can open a TCP
+    connection to some random host may still be blocked by Discord, and only
+    this endpoint answers the question that actually matters.
+    """
+    import httpx
+
+    from .checking.client import API_BASE, AVAILABILITY_PATH
+
+    headers = {
+        "Content-Type": "application/json",
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/register",
+        "User-Agent": "fourchar-radar/0.1 (proxy check)",
+    }
+    try:
+        response = httpx.post(
+            f"{API_BASE}{AVAILABILITY_PATH}",
+            headers=headers,
+            json={"username": "zzzz", "global_name": None},
+            proxy=url,
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    if response.status_code == 200:
+        return True, "works"
+    if response.status_code == 429:
+        try:
+            wait = float(response.json().get("retry_after", 0))
+        except ValueError:
+            wait = 0.0
+        return False, f"reachable, but this IP is throttled (retry after {wait:.0f}s)"
+    return False, f"HTTP {response.status_code}: {response.text[:80]}"
+
+
+def cmd_test_proxies(args: argparse.Namespace, settings: Settings) -> int:
+    """Check each configured proxy and report which ones are usable."""
+    from .wiring import build_pool
+
+    try:
+        pool = build_pool(settings)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 2
+
+    if not pool:
+        print("No proxies configured.")
+        print()
+        print("Add them with, for example:")
+        print("  fourchar-radar run <URL> --proxy http://user:pass@host:port")
+        print("  fourchar-radar run <URL> --proxy-file proxies.txt")
+        print()
+        print("MTProto is a Telegram protocol and will not work here.")
+        return 1
+
+    print(f"Testing {len(pool)} proxy/proxies...\n")
+    usable = 0
+    for slot in pool.slots:
+        print(f"  {_redact_proxy(slot.url)}")
+        sys.stdout.flush()
+        ok, detail = _probe_proxy(slot.url)
+        mark = "OK  " if ok else "FAIL"
+        print(f"       {mark}  {detail}")
+        if ok:
+            usable += 1
+
+    print()
+    print(f"{usable}/{len(pool)} usable. Roughly {usable}x the throughput of one IP.")
+    return 0 if usable else 1
+
+
+def _redact_proxy(url: str) -> str:
+    from .checking.proxies import redact
+
+    return redact(url)
 
 
 # ------------------------------------------------------------------- tui

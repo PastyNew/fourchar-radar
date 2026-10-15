@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 from .checking.client import DiscordAvailabilityClient
-from .checking.ratelimit import AdaptiveRateLimiter
 from .checking.scanner import Scanner
 from .config import Settings
 from .errors import ConfigError, InvalidWebhook
@@ -37,6 +36,7 @@ from .notify.webhook import WebhookNotifier, redact_webhook
 from .platforms import IS_WINDOWS, user_data_dir
 from .sources import build_source
 from .storage import Store
+from .wiring import build_limiter, build_pool
 
 APP_TITLE = "Discord Username Search"
 DEVELOPER = "PastyNew"
@@ -463,6 +463,7 @@ class RadarTui:
     async def _scan(self, settings: Settings) -> None:
         self._loop = asyncio.get_running_loop()
 
+        pool = build_pool(settings)
         notifier = self._notifier(settings)
         try:
             await notifier.verify()
@@ -471,13 +472,12 @@ class RadarTui:
             raise
         self._queue.put("webhook verified by Discord")
 
-        limiter = AdaptiveRateLimiter(
-            settings.rate_limit_rps,
-            start_rps=settings.rate_limit_start_rps or None,
-        )
+        limiter = build_limiter(settings, pool)
+        if pool:
+            self._queue.put(f"proxies: {pool.summary()}")
         store = Store(settings.db_path)
         try:
-            async with DiscordAvailabilityClient(settings, limiter) as client:
+            async with DiscordAvailabilityClient(settings, limiter, pool=pool) as client:
                 scanner = Scanner(settings, store, client, limiter, notifier)
                 self._scanner = scanner
                 beat = asyncio.create_task(self._heartbeat(scanner))

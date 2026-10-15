@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     max_retries: int = Field(default=3, ge=0, le=10)
     user_agent: str = "fourchar-radar/0.1 (+https://github.com/your-org/fourchar-radar)"
     proxy: str | None = None
+    proxy_list: str = Field(
+        default="",
+        description=(
+            "Comma or newline separated proxies. Each has its own rate budget, "
+            "so N ready proxies mean roughly N times the throughput. "
+            "http://, https://, socks5:// and socks4:// are supported; MTProto "
+            "is a Telegram protocol and does not work here."
+        ),
+    )
+    proxy_file: str = Field(
+        default="",
+        description="Read proxies from this file instead, one per line.",
+    )
 
     # ------------------------------------------------------------ alerts
     alert_webhook: bool = True
@@ -180,6 +193,21 @@ class Settings(BaseSettings):
     @property
     def webhook_enabled(self) -> bool:
         return self.alert_webhook and bool(self.discord_webhook_url)
+
+    def proxy_sources(self) -> str:
+        """Proxies from the list, the file, or the single-proxy setting."""
+        if self.proxy_file:
+            from pathlib import Path
+
+            try:
+                return Path(self.proxy_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ConfigError(
+                    f"cannot read RADAR_PROXY_FILE ({self.proxy_file}): {exc}"
+                ) from exc
+        if self.proxy_list:
+            return self.proxy_list
+        return self.proxy or ""
 
     @property
     def bot_enabled(self) -> bool:

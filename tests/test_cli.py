@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from fourchar_radar.cli import build_parser, main
+from fourchar_radar.cli import _apply_overrides, build_parser, main
 from fourchar_radar.config import Settings
 from fourchar_radar.errors import ConfigError
 
@@ -119,3 +119,29 @@ def test_bot_without_token_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     monkeypatch.delenv("RADAR_DISCORD_BOT_TOKEN", raising=False)
     assert main(["bot"]) == 2
+
+
+# ------------------------------------------------------------- proxies
+def test_proxy_flag_is_repeatable() -> None:
+    args = build_parser().parse_args(["run", "--proxy", "http://a:1", "--proxy", "http://b:2"])
+    assert args.proxy == ["http://a:1", "http://b:2"]
+
+
+def test_repeated_proxies_become_a_list() -> None:
+    args = build_parser().parse_args(["run", "--proxy", "http://a:1", "--proxy", "http://b:2"])
+    settings = _apply_overrides(args, Settings(discord_webhook_url=WEBHOOK))
+    assert settings.proxy_list == "http://a:1,http://b:2"
+
+
+def test_proxy_file_is_accepted() -> None:
+    args = build_parser().parse_args(["run", "--proxy-file", "/tmp/p.txt"])
+    settings = _apply_overrides(args, Settings(discord_webhook_url=WEBHOOK))
+    assert settings.proxy_file == "/tmp/p.txt"
+
+
+def test_test_proxies_runs_without_a_webhook(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A diagnostic must not require the configuration it exists to diagnose."""
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("RADAR_DISCORD_WEBHOOK_URL", raising=False)
+    # No proxies configured: says so and points at the real flags.
+    assert main(["run", "--test-proxies"]) == 1

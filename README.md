@@ -295,6 +295,65 @@ In the menu, option **2** asks which of the two you want.
 
 ---
 
+## Proxies
+
+The rate limit is per **IP address**, so the only real lever on speed is
+having more than one egress. This is what a proxy pool is for.
+
+```bash
+fourchar-radar run <URL> --proxy http://user:pass@host:8080
+fourchar-radar run <URL> --proxy http://a:8080 --proxy http://b:8080
+fourchar-radar run <URL> --proxy-file proxies.txt    # one per line, # comments ok
+fourchar-radar run <URL> --test-proxies             # check them, scan nothing
+```
+
+### What actually works here
+
+| Type | Example | Works? |
+|---|---|---|
+| HTTP CONNECT | `http://user:pass@host:8080` | **yes** — most vendors sell this |
+| HTTPS proxy | `https://user:pass@host:8443` | **yes** |
+| SOCKS5 | `socks5://user:pass@host:1080` | **yes** — needs `pip install fourchar-radar[socks]` |
+| SOCKS4 | `socks4://host:1080` | usually |
+| **MTProto** | `mtproto://...` | **no** |
+
+**MTProto is a Telegram transport protocol.** It has nothing to do with
+Discord's API, and a client speaking it will not connect. If a proxy vendor
+sells you "MTProto", that is a Telegram feature, not a general proxy. The tool
+rejects `mtproto://` outright and says so, rather than failing obscurely later.
+
+### How the pool behaves
+
+Each proxy has its own budget, so the sustainable rate scales with how many are
+*ready* right now:
+
+| Ready proxies | Start rate | Roughly |
+|---|---|---|
+| 1 (no pool) | 0.0076 req/s | 1 check / 2 min |
+| 4 | 0.0304 req/s | 1 check / 33 s |
+| 10 | 0.0760 req/s | 1 check / 13 s |
+
+A proxy that Discord throttles is **parked for exactly as long as it is told**
+and the rest carry on. One that cannot be reached at all is dropped from
+rotation with a backoff. `--rps` still sets the ceiling and is never silently
+ignored; `RADAR_RATE_LIMIT_START_RPS` overrides the starting rate when you know
+your endpoints better than the default does.
+
+### A word on what this is
+
+A pool works precisely because each address has its own allowance. That is
+fine for proxies you control or that your provider rents you, and it is not
+fine as a way to hammer a service you have no relationship with. The tool does
+one public read per candidate name and nothing else — no account creation, no
+claiming, no interaction on your behalf. Keep it that way, and keep proxy
+counts to what you actually need.
+
+Residential proxies generally cost more and are less likely to already be
+throttled by Discord than cheap datacenter ones. If your pool reports a lot of
+throttles, that is usually the provider's exit IPs being burned through.
+
+---
+
 ## How the price estimate works
 
 **It is a triage heuristic, not a market quote.** Its job is to answer "is this
@@ -344,12 +403,15 @@ Everything is environment-driven (or `.env`); every flag overrides it.
 | `RADAR_SOURCE` | `wordlist` | `wordlist` / `bruteforce` / `file` / `stdin` |
 | `RADAR_LENGTH` | `4` | username length |
 | `RADAR_NAMES_FILE` | — | required for `--source file` |
-| `RADAR_RATE_LIMIT_RPS` | `0.5` | **ceiling**, not a target |
+| `RADAR_RATE_LIMIT_RPS` | `0.02` | **ceiling**, not a target |
+| `RADAR_RATE_LIMIT_START_RPS` | measured | start rate; `0` = the measured safe rate |
 | `RADAR_CONCURRENCY` | `1` | workers; keep it at 1–2 |
 | `RADAR_ALERT_MIN_TIER` | `rare` | alert threshold |
 | `RADAR_ALERT_COOLDOWN_S` | `0` | minimum gap between alerts |
 | `RADAR_DB_PATH` | `state/radar.db` | SQLite location |
-| `RADAR_PROXY` | — | single egress proxy, e.g. `http://user:pass@host:port` |
+| `RADAR_PROXY_LIST` | — | comma/newline separated proxies; each is its own budget |
+| `RADAR_PROXY_FILE` | — | read proxies from a file, one per line |
+| `RADAR_PROXY` | — | single proxy (shorthand) |
 | `RADAR_LOG_JSON` | `false` | JSON log lines for Docker/journald |
 
 Invalid config fails at startup with a readable message, rather than three

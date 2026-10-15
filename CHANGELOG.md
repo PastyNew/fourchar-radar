@@ -49,6 +49,21 @@ First public release.
   Linux distro and for Windows, with fallbacks for distros missing `ensurepip`
   and for those enforcing PEP 668.
 
+### Added
+
+- **Proxy pool.** `--proxy` (repeatable), `--proxy-file`, and `RADAR_PROXY_LIST`.
+  The endpoint's limit is per IP, so N ready proxies mean N budgets and the
+  pacing budget scales with them. A proxy Discord throttles is parked for
+  exactly as long as it is told while the rest keep working; one that cannot be
+  reached drops out of rotation with a backoff.
+- `--test-proxies` checks each configured proxy against the real endpoint and
+  reports which are usable, before committing to a multi-day scan.
+- `RADAR_RATE_LIMIT_START_RPS` to override the starting rate when you know the
+  endpoints better than the default.
+- MTProto is rejected with an explanation: it is a Telegram transport and will
+  not connect to Discord. SOCKS4/5 and HTTP/HTTPS proxies are supported.
+- `[socks]` extra for SOCKS proxy support.
+
 ### Fixed
 
 - A resumed scan silently skipped every name it already knew, so the user

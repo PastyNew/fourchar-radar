@@ -213,7 +213,7 @@ async def test_default_client_sends_web_client_headers(settings: Settings) -> No
     fast = AdaptiveRateLimiter(ceiling_rps=1.0, start_rps=1000.0)
     client = DiscordAvailabilityClient(settings, fast)
     try:
-        headers = client._client.headers
+        headers = client._client_for(None).headers
         assert headers["user-agent"].startswith("fourchar-radar")
         assert headers["origin"] == "https://discord.com"
         assert "register" in headers["referer"]

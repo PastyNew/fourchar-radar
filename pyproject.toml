@@ -33,7 +33,10 @@ dependencies = [
 [project.optional-dependencies]
 # The Discord bot (slash commands) is optional -- webhook mode needs no bot at all.
 bot = ["discord.py>=2.3,<3.0"]
+# SOCKS proxies need a transport httpx does not bundle. HTTP proxies need nothing.
+socks = ["httpx[socks]>=0.27,<1.0"]
 dev = [
+  "socks",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5.0",

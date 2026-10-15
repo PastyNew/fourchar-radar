@@ -28,6 +28,7 @@ from ..config import Settings
 from ..errors import CheckFailed, InvalidUsername, Shutdown, Throttled
 from ..models import Verdict, utcnow
 from ..names import is_valid
+from .proxies import ProxyPool
 from .ratelimit import AdaptiveRateLimiter
 
 log = logging.getLogger(__name__)
@@ -61,14 +62,24 @@ class DiscordAvailabilityClient:
         limiter: AdaptiveRateLimiter,
         *,
         client: httpx.AsyncClient | None = None,
+        pool: ProxyPool | None = None,
     ) -> None:
         self.settings = settings
         self.limiter = limiter
         self._owns_client = client is None
-        self._client = client or self._build_client(settings)
+        self.pool = pool if pool is not None else ProxyPool.from_string(settings.proxy_list)
+        # httpx binds a proxy to the client, so a pool means one client each.
+        self._clients: dict[str | None, httpx.AsyncClient] = {}
+        if client is not None:
+            self._clients[None] = client
+        elif self.pool:
+            for slot in self.pool.slots:
+                self._clients[slot.url] = self._build_client(settings, slot.url)
+        else:
+            self._clients[None] = self._build_client(settings)
 
     # ---------------------------------------------------------- lifecycle
-    def _build_client(self, settings: Settings) -> httpx.AsyncClient:
+    def _build_client(self, settings: Settings, proxy: str | None = None) -> httpx.AsyncClient:
         headers = {
             "Accept": "application/json",
             "Origin": "https://discord.com",
@@ -86,9 +97,16 @@ class DiscordAvailabilityClient:
             ),
             "follow_redirects": False,
         }
-        if settings.proxy:
-            kwargs["proxy"] = settings.proxy
+        if proxy:
+            kwargs["proxy"] = proxy
         return httpx.AsyncClient(**kwargs)  # type: ignore[arg-type]
+
+    def _client_for(self, proxy: str | None) -> httpx.AsyncClient:
+        """The client bound to *proxy*; ``None`` means a direct connection."""
+        try:
+            return self._clients[proxy]
+        except KeyError as exc:  # pragma: no cover - a bug, not a runtime case
+            raise KeyError(f"no HTTP client for proxy {proxy!r}") from exc
 
     async def __aenter__(self) -> DiscordAvailabilityClient:
         return self
@@ -98,7 +116,9 @@ class DiscordAvailabilityClient:
 
     async def aclose(self) -> None:
         if self._owns_client:
-            await self._client.aclose()
+            for client in self._clients.values():
+                await client.aclose()
+        self._clients.clear()
 
     # ------------------------------------------------------------- check
     async def check(self, name: str) -> Verdict:
@@ -124,13 +144,27 @@ class DiscordAvailabilityClient:
             if not await self.limiter.acquire():
                 raise Shutdown(name)
 
+            # With a pool, every proxy that is not currently penalised gets a
+            # turn; if all of them are, wait for the first to come back rather
+            # than walking straight into another 429.
+            if self.pool:
+                proxy = self.pool.acquire()
+                if proxy is None:
+                    await asyncio.sleep(min(self.pool.wait_time(), 5.0) or 1.0)
+                    continue
+            else:
+                proxy = None
+
             started = time.perf_counter()
 
             try:
-                response = await self._client.post(url, json=payload)
+                response = await self._client_for(proxy).post(url, json=payload)
             except httpx.HTTPError as exc:
                 error_attempts += 1
                 self.limiter.penalize_error()
+                if proxy is not None:
+                    # A dead proxy is the proxy's problem, not Discord's.
+                    self.pool.fail(proxy)
                 if error_attempts > self.settings.max_retries:
                     raise CheckFailed(name, None, str(exc)) from exc
                 await self._sleep_backoff(error_attempts)
@@ -142,6 +176,8 @@ class DiscordAvailabilityClient:
             if response.status_code == 200:
                 taken = self._parse_taken(name, response)
                 self.limiter.record_success()
+                if proxy is not None:
+                    self.pool.record_success(proxy)
                 return Verdict(
                     name=name,
                     available=not taken,
@@ -155,8 +191,14 @@ class DiscordAvailabilityClient:
                 retry_after = self._parse_retry_after(response)
                 if throttle_retries > self.settings.max_retries:
                     raise Throttled(name, retry_after)
-                # acquire() on the next loop honours the gate we set here.
-                self.limiter.penalize(retry_after)
+                if proxy is not None:
+                    # Park *this* proxy only. The others are still good, so a
+                    # pool keeps working while one IP serves out its penalty.
+                    self.pool.penalize(proxy, retry_after)
+                # Without a pool this is the only budget we have, so the gate
+                # has to apply globally.
+                if not self.pool:
+                    self.limiter.penalize(retry_after)
                 continue
 
             # --- 400: permanently invalid --------------------------------
